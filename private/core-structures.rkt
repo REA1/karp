@@ -4,6 +4,7 @@
   "verifier-type.rkt"
   "primitive-data-type.rkt"
   "problem-definition-utility.rkt"
+  "karp-contract.rkt"
   racket/generic
   [for-syntax racket/list
               racket/struct
@@ -12,6 +13,7 @@
               syntax/parse
               syntax/id-table
               syntax/stx
+              racket/syntax-srcloc
               racket/match]
   [for-meta 2 racket/base
               syntax/parse]
@@ -52,6 +54,14 @@
  dp-set/c
  dp-setof/c
  dp-setof-d/c
+
+ dp-set/kc
+ dp-setof/kc
+ dp-setof-d/kc
+ dp-subset-of-d/kc
+
+ dp-set-with-size=/kc
+ 
  a-set
  set-∈
  set-∉
@@ -281,6 +291,21 @@
      (interfaced-struct? an-object)
      (assoc 'set (get-interface an-object))))))
 
+(define-simple-contract/kc dp-set/kc (v)
+  (and
+   (interfaced-struct? v)
+   (assoc 'set (get-interface v)))
+  "expects a value interpretable as a set")
+
+#;(define (dp-set/kc v the-srcloc name context [predicate? #f])
+  (if (and
+       (interfaced-struct? v)
+       (assoc 'set (get-interface v)))
+      v
+      (contract-fail/kc
+       the-srcloc name "can not be interpreted as a set"
+       context v predicate?)))
+
 ; contract combinator for set-like with members satisfying given contract, internal
 ; Note: flat version, membering element contracts are also flat
 ;       used to check only structure without value dependency
@@ -315,6 +340,24 @@
                               an-object '(expected "an object interpretable as a set" given: "~e") 
                               an-object))
        ))))
+
+(define (dp-setof/kc el-ctc)
+  (and/kc
+   dp-set/kc
+   (kc-contract (v the-srcloc name context [predicate? #f])
+    (let* ([the-set (as-set v)]
+           [the-hash (dp-set-S the-set)]
+           [success? (andmap
+                       (λ (e)
+                         ; enforce [ e ∈ S => (el-ctc e) is #t ]
+                         (if (hash-ref the-hash e)
+                             ; error triggered here if violation
+                             (el-ctc e the-srcloc name         
+                                     (cons "an element" context)
+                                     predicate?) 
+                             #t))
+                       (hash-keys the-hash))])
+      (if predicate? success? v)))))
 
 ; construct a contract factory for contract of set-like with members satisfying
 ; specific contracts, internal
@@ -359,7 +402,29 @@
            )))
       ))
 
-; return a contract checking the set size of a set is exactly n
+; convention: the contract generated does not need to check the non-dependent shape
+(define ((dp-setof-d/kc el-ctcs-d) v . rest) ; curried shorthand
+  ; produce contract of elements given dependent values
+  (let ([el-ctcs (apply el-ctcs-d (cons v rest))])
+    (and/kc
+     dp-set/kc
+     (kc-contract (v the-srcloc name context [predicate? #f])
+      (let* ([the-set (as-set v)]
+             [the-hash (dp-set-S the-set)]
+             [success? (andmap
+                        (λ (e)
+                          ; enforce [ e ∈ S => (el-ctc e) is #t ]
+                          (if (hash-ref the-hash e)
+                              ; error triggered here if violation
+                              (el-ctcs e the-srcloc name         
+                                      (cons "an element" context)
+                                      predicate?) 
+                              e))
+                        (hash-keys the-hash))])
+        (if predicate? success? v))))
+    ))
+
+; return a contract checking the set size of a set being exactly n
 (define (dp-set-size=/c n)
   (make-flat-contract
    #:name 'set-size
@@ -375,15 +440,36 @@
                               n
                               a-set))))))
 
+; Note: the contract produced assuming the object being checked is a set
+(define (dp-set-size=-d/kc n)
+  (kc-contract (v the-srcloc name context [predicate? #f])
+      (if (equal? (dp-int-unwrap (set-size v))
+                  (dp-int-unwrap n))
+          v
+          (contract-fail/kc the-srcloc name
+                            (format "expects a set of size ~e" (dp-int-unwrap n))
+                            context v predicate?))))
+
+; returns a contract checking if an object is a set with size exactly n
+(define (dp-set-with-size=/kc n)
+  (and/kc dp-set/kc (dp-set-size=-d/kc n)))
+
 ; convert set-like to set, raise error otherwise
 ; an-object : any/c
 ; -> dp-set?
-(define (as-set an-object)
+#;(define (as-set an-object)
   (r:if (r:and
          (interfaced-struct? an-object)
          (r:assoc 'set (get-interface an-object)))
         ((r:cdr (r:assoc 'set (get-interface an-object))) an-object)
         (error "can not be used as a set:" an-object)))
+
+; internal, should not protect
+#;(define/k-contract (as-set an-object)
+  (->k [x dp-set/kc] any/kc)
+  ((r:cdr (r:assoc 'set (get-interface an-object))) an-object))
+(define (as-set an-object)
+  ((r:cdr (r:assoc 'set (get-interface an-object))) an-object))
 
 ; covert the ground set of a set-like to Racket list, internal
 ; a-set : dp-set/c
@@ -395,6 +481,7 @@
         '())))
 
 ; create a new set with elements
+; Note: does not wrap int
 ; elements : list?
 ; -> dp-set?
 (define (a-set . elements)
@@ -477,10 +564,17 @@
       [_ (λ (stx) (raise-syntax-error #f "expect 2 arguments" stx))])))
 
 ; concrete versions, unsafe when a-element contains symbolic value
-(define (set-∈ a-element a-set)
+#;(define (set-∈ a-element a-set)
   (hash-ref (dp-set-S (as-set a-set)) (dp-wrap-if-raw-int a-element) #f))
-(define (set-∉ a-element a-set)
+#;(define (set-∉ a-element a-set)
   (r:not (set-∈ a-element a-set)))
+(define/contract/kc (set-∈ a-element a-set)
+  (->k ([x any/kc] [y dp-set/kc]) any/kc)
+  (hash-ref (dp-set-S (as-set a-set)) (dp-wrap-if-raw-int a-element) #f))
+(define/contract/kc (set-∉ a-element a-set)
+  (->k ([x any/kc] [y dp-set/kc]) any/kc)
+  (r:not (set-∈ a-element a-set)))
+
 ; safe versions
 (define (set-∈-safe a-element a-set)
   (∃ [v ∈ (as-set a-set)]
@@ -562,7 +656,8 @@
 ; set-a : dp-set/c
 ; set-b : dp-set/c
 ; -> boolean?
-(define (set-subset-of? set-a set-b)
+(define/contract/kc (set-subset-of? set-a set-b)
+  (->k ([x dp-set/kc] [y dp-set/kc]) any/kc)
   (r:let ([the-set-hash-a (dp-set-S (as-set set-a))]
           [the-set-hash-b (dp-set-S (as-set set-b))])
          (r:andmap (r:λ (e)
@@ -573,6 +668,13 @@
 (kv-func-type-annotate set-subset-of? ((tSetOf τb) (tSetOf τb) (tBool))
                        "two sets of the same element type")
 
+; Note: 1) assuming the value dependent on is always correct, i.e. the-superset is a set
+;       2) assuming the value being checked has the correct shape, i.e. v is a set
+(define (dp-subset-of-d/kc the-superset)
+  (make-simple-contract/kc (v)
+    (set-subset-of? v the-superset)
+    (format "expects a subset of ~v" the-superset)))
+
 ; XXX: maybe nonsolvable(?) because of the presence of remove-duplicates
 ; union set of the set-likes
 ; the ground set of the union is the union of ground sets
@@ -581,13 +683,26 @@
 (define-syntax (set-∪ stx)
   (syntax-parse stx
     [(_ a-set-like ...)
-     #:with (the-set ...) (generate-temporaries #'(a-set-like ...))
+     #:with (the-set ...)
+     (let ([l (stx->list #'(a-set-like ...))])
+       (for/list ([i (range 1 (+ (length l) 1))]
+                  [v l])
+         #`(contracted-v/kc
+            dp-set/kc #,v #,(syntax-srcloc v) 'set-∪
+            (list (format "the ~v~s argument of set-∪" #,i
+                          '#,(ordinal-numeral i)
+                          #;(cond [(equal? i 1) 'st]
+                                  [(equal? i 2) 'nd]
+                                  [(equal? i 3) 'rd]
+                                  [else 'th]))))))
+     #;(generate-temporaries #'(a-set-like ...))
+     #:with (a-set ...) (generate-temporaries #'(a-set-like ...))
      #:with (a-gnd-set ...) ; ground sets represented as lists of hash-keys
      (r:map
       (r:λ (s)
            #`(hash-keys (dp-set-S #,s)))           
-      (syntax->list #'(the-set ...)))
-     #'(r:let ([the-set (as-set a-set-like)] ...) ; caching casting to set
+      (syntax->list #'(a-set ...)))
+     #'(r:let ([a-set (as-set the-set)] ...) ; caching casting to set
         (dp-set
          (make-immutable-hash
           (r:map
@@ -597,7 +712,7 @@
                 (r:ormap
                  (r:λ (s) ; set-like
                       (hash-ref (dp-set-S s) e #f))
-                 (r:list the-set ...))))
+                 (r:list a-set ...))))
            (r:remove-duplicates (r:append a-gnd-set ...))))))])) ; maybe don't remove duplicate here?
 (kv-func-type-annotate set-∪ ((tSetOf τb) (tSetOf τb) (tSetOf τb))
                        "two sets of the same element-type")
@@ -613,8 +728,20 @@
   (syntax-parse stx
     [(_ a-set-like0 a-set-like1 ...)
      #:with (s1 ...) (generate-temporaries #'(a-set-like1 ...))
-     #'(let ([s0 (as-set a-set-like0)]
-             [s1 (as-set a-set-like1)] ...)
+     #:with (the-set0 the-set1 ...)
+     (let ([l (stx->list #'(a-set-like0 a-set-like1 ...))])
+       (for/list ([i (range 1 (+ (length l) 1))]
+                  [v l])
+         #`(contracted-v/kc
+            dp-set/kc #,v #,(syntax-srcloc v) 'set-∪
+            (list (format "the ~v~s argument of set-∪" #,i
+                          '#,(ordinal-numeral i)
+                          #;(cond [(equal? i 1) 'st]
+                                   [(equal? i 2) 'nd]
+                                   [(equal? i 3) 'rd]
+                                   [else 'th]))))))
+     #`(let ([s0 (as-set the-set0)]
+             [s1 (as-set the-set1)] ...)
          (dp-set
           (make-immutable-hash 
            (r:map
@@ -663,7 +790,8 @@
 ; set-a : dp-set/c
 ; set-b : dp-set/c
 ; -> dp-set?
-(define (set-minus set-a set-b)
+(define/contract/kc (set-minus set-a set-b)
+  (->k ([x dp-set/kc] [y dp-set/kc]) dp-set/kc)
   (dp-set
    (make-immutable-hash
     (r:let ([the-set-hash-a (dp-set-S (as-set set-a))]
@@ -681,7 +809,8 @@
 
 ; calculate the number of members in the set
 ; a-set : dp-set/c
-(define (set-size a-set)
+(define/contract/kc (set-size a-set)
+  (->k ([x dp-set/kc]) any/kc)
   (r:let ([the-set-hash (dp-set-S (as-set a-set))])
     (dp-integer
      (r:count
@@ -690,6 +819,7 @@
      ; XXX: unforunately for now we can not tell if the set is constant or not
      ;      assign the size to ;poly for safety
      'poly)))
+
 (kv-func-type-annotate set-size ((tSetOf τb) (tInt))
                        "a set")
 
@@ -708,8 +838,9 @@
     (dp-set (for/hash ([e members])
               (values e (fresh-symbolic-bool)))))
    (if size
-       (r:list (r:λ (a-set)
-                   (r:equal? (set-size a-set) size)))
+       (without-protection/kc
+        (r:list (r:λ (a-set)
+                     (dp-equal? (set-size a-set) size))))
        '())))
 
 ; null set
@@ -741,7 +872,12 @@
  n-th
  tpl
 
- tuple)
+ tuple
+
+ dp-tuple-any/kc
+ dp-duple-with-length=/kc
+ dp-tuple/kc
+ )
 
 ; type object representing Tuple
 (begin-for-syntax
@@ -790,37 +926,92 @@
              (r:λ (the-tuple port mode)
                   (fprintf port "~a"
                            (dp-tuple-lst the-tuple))))])
+
+(define-simple-contract/kc dp-tuple-any/kc (v)
+  (dp-tuple? v)
+  "expects a tuple")
+
+(define (dp-duple-with-length=/kc n)
+  (and/kc
+   dp-tuple-any/kc
+   (kc-contract (v the-srcloc name context [predicate? #f])
+      (if (equal? (length (dp-tuple-lst v))
+                  (dp-int-unwrap n))
+          v
+          (contract-fail/kc the-srcloc name
+                            (format "expects a tuple with exactly ~e components" (dp-int-unwrap n))
+                            context v predicate?)))))
+
+(define (dp-duple-with-length>=/kc n)
+  (and/kc
+   dp-tuple-any/kc
+   (kc-contract (v the-srcloc name context [predicate? #f])
+      (if (>= (length (dp-tuple-lst v))
+              (dp-int-unwrap n))
+          v
+          (contract-fail/kc the-srcloc name
+                            (format "expects a tuple with at least ~e components" (dp-int-unwrap n))
+                            context v predicate?)))))
+
 ; XXX: element accessors of the tuple might not support
 ;      symbolic tuples at this point
-(define (fst a-tuple)
+(define/contract/kc (fst a-tuple)
+  (->k ([x (dp-duple-with-length>=/kc 1)]) any/kc)
   (r:first (dp-tuple-lst a-tuple)))
 (kv-func-type-annotate fst ((tTuple τb1 τb2 ...) τb1)
                        "a tuple")
 
-(define (snd a-tuple)
+(define/contract/kc (snd a-tuple)
+  (->k ([x (dp-duple-with-length>=/kc 2)]) any/kc)
   (r:second (dp-tuple-lst a-tuple)))
 (kv-func-type-annotate snd ((tTuple τb1 τb2 τb3 ...) τb2)
                        "a tuple")
 
-(define (trd a-tuple)
+(define/contract/kc (trd a-tuple)
+  (->k ([x (dp-duple-with-length>=/kc 3)]) any/kc)
   (r:third (dp-tuple-lst a-tuple)))
 (kv-func-type-annotate trd ((tTuple τb1 τb2 τb3 τb4 ...) τb3)
-                       "a tuple of at least 3 elements")
+                       "a tuple of at least 3 components")
 
-(define (frh a-tuple)
+(define/contract/kc (frh a-tuple)
+  (->k ([x (dp-duple-with-length>=/kc 4)]) any/kc)
   (r:fourth (dp-tuple-lst a-tuple)))
 (kv-func-type-annotate frh ((tTuple τb1 τb2 τb3 τb4 τb5 ...) τb4)
-                       "a tuple of at least 4 elements")
+                       "a tuple of at least 4 components")
 
-(define (ffh a-tuple)
+(define/contract/kc (ffh a-tuple)
+  (->k ([x (dp-duple-with-length>=/kc 5)]) any/kc)
   (r:fifth (dp-tuple-lst a-tuple)))
 
-(define (n-th a-tuple n)
+(define/contract/kc (n-th a-tuple n)
+  (->k ([x (dp-duple-with-length>=/kc n)]) any/kc)
   (r:list-ref (dp-tuple-lst a-tuple) n))
 
 (define (dp-tuple/c . el-ctcs)
   (struct/c dp-tuple
             (apply list/c el-ctcs)))
+
+(define (dp-tuple/kc . el-ctcs)
+  (and/kc
+   (dp-duple-with-length=/kc (length el-ctcs))
+   (kc-contract (v the-srcloc name context [predicate? #f])
+    (let* ([the-tpl v]
+           [the-lst (dp-tuple-lst v)]
+           [success? (andmap
+                       (λ (i)
+                         ; error triggered here if violation
+                         ((list-ref el-ctcs i) (list-ref the-lst i)
+                          the-srcloc name         
+                          (cons (format "the ~v~s component of" i
+                                        (cond [(equal? i 1) 'st]
+                                              [(equal? i 2) 'nd]
+                                              [(equal? i 3) 'rd]
+                                              [else 'th]))
+                                context)
+                          predicate?))
+                       (range (length the-lst)))])
+      (if predicate? success? v)))))
+
 
 ; construct a contract factory for contract of tuple
 ; internal
@@ -836,6 +1027,31 @@
       ((apply (list-ref el-ctcs-d i) (cons v rest))
        (list-ref (dp-tuple-lst a-tuple) i)))
     (range (length (dp-tuple-lst a-tuple))))))
+
+(define ((dp-tuple-d/kc el-ctcs-d) v . rest) ; curried shorthand
+  ; produce contract of elements given dependent values
+  (let ([el-ctcs (apply el-ctcs-d (cons v rest))])
+    (and/kc
+     dp-tuple-any/kc
+     (kc-contract (v the-srcloc name context [predicate? #f])
+      (let* ([the-tpl v]
+             [the-lst (dp-tuple-lst v)]
+             [success? (andmap
+                        (λ (i)
+                          ; error triggered here if violation
+                          ((list-ref el-ctcs i) (list-ref the-lst i)
+                          the-srcloc name         
+                          (cons (format "the ~v~s component of" i
+                                        (cond [(equal? i 1) 'st]
+                                              [(equal? i 2) 'nd]
+                                              [(equal? i 3) 'rd]
+                                              [else 'th]))
+                                context)
+                          predicate?))
+                        (range (length the-lst)))])
+        (if predicate? success? v))))
+    ))
+
 
 ; tuple constructor
 (define (tpl v . rest)
@@ -893,8 +1109,8 @@
            type 'dont-care
            kv-type-object #'(tSymbol) ; use as syntax object to avoid 3d-syntax
            atomic? #f ; because you don't know what's inside, e.g. might be sets
-           ctc #'any/c
-           v-dep-ctc #'v-dep-any/c
+           ctc #'any/kc
+           v-dep-ctc #'v-dep-any/kc
            type-data '()
            accessors '()
            generator #`(λ (a-inst) ; the instance can be incomplete
@@ -977,41 +1193,16 @@
                  [el-v-dep-ctc (dp-stx-info-field el-type v-dep-ctc)]
                  [set-ctc
                   (if size-as-num
-                      #`(make-flat-contract
-                         #:name '-subset
-                         #:late-neg-projection
-                         (λ (blame)
-                           (λ (a-set neg-party)
-                             ; use dp-equal? to wrap raw int if present
-                             (if (dp-equal? (set-size a-set) #,size-as-num)
-                                 (((contract-late-neg-projection (dp-setof/c #,el-ctc)) blame)
-                                  a-set neg-party)             
-                                 (raise-blame-error blame #:missing-party neg-party
-                                                    a-set
-                                                    '(expected "a set of size ~e" given: "~e")
-                                                    #,size-as-num
-                                                    a-set)))))
-                      #`(dp-setof/c #,el-ctc))]
+                      #`(and/kc (dp-setof/kc #,el-ctc)
+                                (dp-set-size=-d/kc #,size-as-num))
+                      #`(dp-setof/kc #,el-ctc))]
                  [set-v-dep-ctc
                   (if (and maybe-size (not size-as-num))
                       #`(λ (a-inst)
-                          (make-flat-contract
-                           #:name '-subset
-                           #:late-neg-projection
-                           (λ (blame)
-                             (define el-ctc ((dp-setof-d/c #,el-v-dep-ctc) a-inst))
-                             (λ (a-set neg-party)
-                               ; use dp-equal? to wrap raw int if present
-                               (if (dp-equal? (set-size a-set) #,(instance-field-ref #'a-inst maybe-size))
-                                   (((contract-late-neg-projection el-ctc) blame)
-                                    a-set neg-party)             
-                                   (raise-blame-error blame #:missing-party neg-party
-                                                      a-set
-                                                      '(expected "a set of size ~e" given: "~e")
-                                                      #,(instance-field-ref #'a-inst maybe-size)
-                                                      a-set))))))
-                                   
-                      #`(dp-setof-d/c #,el-v-dep-ctc))]
+                          (define el-ctc ((dp-setof-d/kc #,el-v-dep-ctc) a-inst))
+                          (and/kc el-ctc
+                                  (dp-set-size=-d/kc #,(instance-field-ref #'a-inst maybe-size))))                                
+                      #`(dp-setof-d/kc #,el-v-dep-ctc))]
                  ; ids in referred parts
                  [type-desc-ids (dp-stx-info-field el-type referred-ids '())])
             (dp-stx-type-desc (generate-temporary #'set)
@@ -1105,8 +1296,8 @@
                     el-types)]
               [el-ctcs (map (λ (a-type-info) (dp-stx-info-field a-type-info ctc)) el-types)]
               [el-v-dep-ctcs (map (λ (a-type-info) (dp-stx-info-field a-type-info v-dep-ctc)) el-types)]
-              [el-ctc #`(dp-tuple/c #,@el-ctcs)]
-              [el-v-dep-ctc #`(dp-tuple-d/c #,@el-v-dep-ctcs) ]
+              [el-ctc #`(dp-tuple/kc #,@el-ctcs)]
+              [el-v-dep-ctc #`(dp-tuple-d/kc #,@el-v-dep-ctcs) ]
               [upstream-lst (map
                              (λ (i)
                                (if (identifier? (list-ref sets-lst i))
@@ -1133,8 +1324,8 @@
             type 'set
             kv-type-object #`(tSetOf (tTuple #,@el-kv-type-objects))
             atomic? #f
-            ctc #'(dp-setof/c any/c)
-            v-dep-ctc #`(dp-setof-d/c v-dep-any/c)
+            ctc #'(dp-setof/kc any/kc)
+            v-dep-ctc #`(dp-setof-d/kc v-dep-any/kc)
             upstream upstream-lst
             upstream-accessor upstream-accessor-lst
             upstream-combinator #'dp-set-product
@@ -1249,75 +1440,20 @@
               [el-ctc (dp-stx-info-field parsed-el-type ctc)]
               [el-v-dep-ctc (dp-stx-info-field parsed-el-type v-dep-ctc)]
               [set-ctc (if size-as-num
-                           #`(make-flat-contract
-                              #:name '-subset
-                              #:late-neg-projection
-                              (λ (blame)
-                                (λ (a-set neg-party)
-                                  ; use dp-equal? to wrap raw int if present
-                                  (if (dp-equal? (set-size a-set) #,size-as-num)
-                                      (((contract-late-neg-projection (dp-setof/c #,el-ctc)) blame)
-                                       a-set neg-party)               
-                                      (raise-blame-error blame #:missing-party neg-party
-                                                         a-set
-                                                         '(expected "a set of size ~e" given: "~e")
-                                                         #,size-as-num
-                                                         a-set)))))
-                           #`(dp-setof/c #,el-ctc))]
+                           #`(and/kc (dp-setof/kc #,el-ctc)
+                                     (dp-set-size=-d/kc #,size-as-num))
+                           #`(dp-setof/kc #,el-ctc))]
               [set-v-dep-ctc #`(λ (a-inst)
-                                 (make-flat-contract
-                                  #:name '-subset-v-dep
-                                  #:late-neg-projection
-                                  (λ (blame)
-                                    ; projection for the value dependent contract of the elements
-                                    (define setof-v-dep-proj
-                                      ((contract-late-neg-projection
-                                       ((dp-setof-d/c #,el-v-dep-ctc) a-inst))
-                                       blame))
-                                    (λ (a-set neg-party)
-                                      (if (set-subset-of? ; subset constraint
-                                           a-set
-                                           ; discarded
-                                           ; #; no type annotation for a-inst available yet
-                                           ; #; can't refer the instance field by name accessor
-                                           ; #; no way to annotate a-inst as annotation has not been generated
-                                           #|(#,(let loop ([cur-layer upstream])
-                                           (if (identifier? cur-layer)
-                                               cur-layer
-                                               #`(#,(dp-stx-info-field cur-layer upstream-accessor)
-                                                  #,(loop (dp-stx-info-field cur-layer upstream)))))
-                                                   a-inst)
-                                            ; |#; end
-                                           (#,upstream-accessor ; see also subgraph-of
-                                            #,(trace-upstream-to-field upstream #'a-inst)))
-                                          
-                                          (if 
-                                           ; size contract when size is given by an instance field
-                                           #,(if (and maybe-size (not size-as-num))
-                                                 ; use dp-equal? to wrap raw int if present
-                                                 #`(dp-equal? (set-size a-set)
-                                                           ; maybe-size is already a syntax object
-                                                           #,(instance-field-ref #'a-inst maybe-size))
-                                                 #'#t)
-                                           ; return the projection on the value-dependent contract 
-                                           (setof-v-dep-proj a-set neg-party)
-                                           (raise-blame-error
-                                            blame #:missing-party neg-party
-                                            a-set
-                                            '(expected "a set of size ~e" given: "~e")
-                                            ; ``if'' is to avoid calling instance-field-ref when maybe-size
-                                            ; is #f. It is not known when the code is generated.
-                                            #,(if (and maybe-size (not size-as-num)) 
-                                                  #`#,(instance-field-ref #'a-inst maybe-size)
-                                                  #''impossible) ; this line should never reached
-                                            a-set)) 
-                                          (raise-blame-error blame #:missing-party neg-party
-                                                             a-set
-                                                             '(expected "a subset of ~e" given: "~e")
-                                                             (#,upstream-accessor ; see also subgraph-of
-                                                              #,(trace-upstream-to-field upstream #'a-inst))
-                                                             a-set))
-                                      ))))]
+                                 (and/kc
+                                  ((dp-setof-d/kc #,el-v-dep-ctc) a-inst)
+                                  (dp-subset-of-d/kc
+                                   (#,upstream-accessor ; see also subgraph-of
+                                    #,(trace-upstream-to-field upstream #'a-inst)))
+                                  #,(if (and maybe-size (not size-as-num))
+                                        ; use dp-equal? to wrap raw int if present
+                                        #`(dp-set-size=-d/kc
+                                           #,(instance-field-ref #'a-inst maybe-size))
+                                        #'any/kc)))]
               ; ids referred by superset or setlike-value
               [upstream-ids (append
                              (if (attribute superset-name) (list #'superset-name) '())
@@ -1392,8 +1528,8 @@
                        el-types)]  
                  [el-ctcs (map (λ (a-stx-info) (dp-stx-info-field a-stx-info ctc)) el-types)]
                  [el-v-dep-ctcs (map (λ (a-stx-info) (dp-stx-info-field a-stx-info v-dep-ctc)) el-types)]
-                 [tuple-ctc #`(dp-tuple/c #,@el-ctcs)]
-                 [tuple-v-dep-ctc #`(dp-tuple-d/c #,@el-v-dep-ctcs)]
+                 [tuple-ctc #`(dp-tuple/kc #,@el-ctcs)]
+                 [tuple-v-dep-ctc #`(dp-tuple-d/kc #,@el-v-dep-ctcs)]
                  ; ids in referred parts
                  [type-desc-ids (apply append
                                        (map
@@ -1678,127 +1814,213 @@
 (define-syntax (∀ stx)
   (syntax-parse stx
     [(_ x-in-X:element-of-a-set expr)
-     #'(r:andmap
-        (r:λ (x-in-X.x)
-          (r:=>
-           (set-∈ x-in-X.x x-in-X.X)
-           expr))
-        (dp-ground-set->list x-in-X.X))]
+     #`(let ([X (contracted-v/kc
+                 dp-set/kc
+                 x-in-X.X
+                 #,(syntax-srcloc #'x-in-X.X)
+                 '∀
+                 (list "the value quantified over"))])
+         (r:andmap
+          (r:λ (x-in-X.x)
+               (r:=>
+                (set-∈ x-in-X.x X)
+                expr))
+          (dp-ground-set->list X)))]
     [(_ x-y-in-X-Y:element-of-product-of-2-sets x1-x2-expr)
-     #'(r:andmap
-        (r:λ (x-y-in-X-Y.x)
-             (r:=>
-              (set-∈ x-y-in-X-Y.x x-y-in-X-Y.X)
-              (r:andmap
-               (r:λ (x-y-in-X-Y.y)
-                    (r:=>
-                     (r:and
-                      (set-∈ x-y-in-X-Y.y x-y-in-X-Y.Y)
-                      x-y-in-X-Y.x-y-pred?)
-                     x1-x2-expr))
-               (dp-ground-set->list x-y-in-X-Y.Y))))
-        (dp-ground-set->list x-y-in-X-Y.X))]))
+     #`(let ([X (contracted-v/kc
+                 dp-set/kc
+                 x-y-in-X-Y.X
+                 #,(syntax-srcloc #'x-y-in-X-Y.X)
+                 '∀
+                 (list "the value quantified over"))]
+             [Y (contracted-v/kc
+                 dp-set/kc
+                 x-y-in-X-Y.Y
+                 #,(syntax-srcloc #'x-y-in-X-Y.Y)
+                 '∀
+                 (list "the value quantified over"))])
+         (r:andmap
+          (r:λ (x-y-in-X-Y.x)
+               (r:=>
+                (set-∈ x-y-in-X-Y.x X)
+                (r:andmap
+                 (r:λ (x-y-in-X-Y.y)
+                      (r:=>
+                       (r:and
+                        (set-∈ x-y-in-X-Y.y Y)
+                        x-y-in-X-Y.x-y-pred?)
+                       x1-x2-expr))
+                 (dp-ground-set->list Y))))
+          (dp-ground-set->list X)))]))
 
 (define-syntax (∃ stx)
   (syntax-parse stx
     [(_ x-in-X:element-of-a-set expr)
-     #'(r:ormap
-        (r:λ (x-in-X.x)
-             (r:and
-              (set-∈ x-in-X.x x-in-X.X)
-              expr))
-        (dp-ground-set->list x-in-X.X))]
+     #`(let ([X (contracted-v/kc
+                  dp-set/kc
+                  x-in-X.X
+                  #,(syntax-srcloc #'x-in-X.X)
+                  '∃
+                  (list "the value quantified over"))])
+          (r:ormap
+           (r:λ (x-in-X.x)
+                (r:and
+                 (set-∈ x-in-X.x X)
+                 expr))
+           (dp-ground-set->list X)))]
     [(_ x-y-in-X-Y:element-of-product-of-2-sets x1-x2-expr)
-     #'(r:ormap
-        (r:λ (x-y-in-X-Y.x)
-             (r:=>
-              (set-∈ x-y-in-X-Y.x x-y-in-X-Y.X)
-              (r:ormap
-               (r:λ (x-y-in-X-Y.y)
-                    (r:=>
-                     (r:and
-                      (set-∈ x-y-in-X-Y.y x-y-in-X-Y.Y)
-                      x-y-in-X-Y.x-y-pred?)
-                     x1-x2-expr))
-               (dp-ground-set->list x-y-in-X-Y.Y))))
-        (dp-ground-set->list x-y-in-X-Y.X))]))
+     #`(let ([X (contracted-v/kc
+                 dp-set/kc
+                 x-y-in-X-Y.X
+                 #,(syntax-srcloc #'x-y-in-X-Y.X)
+                 '∃
+                 (list "the value quantified over"))]
+             [Y (contracted-v/kc
+                 dp-set/kc
+                 x-y-in-X-Y.Y
+                 #,(syntax-srcloc #'x-y-in-X-Y.Y)
+                 '∃
+                 (list "the value quantified over"))])
+         (r:ormap
+          (r:λ (x-y-in-X-Y.x)
+               (r:=>
+                (set-∈ x-y-in-X-Y.x X)
+                (r:ormap
+                 (r:λ (x-y-in-X-Y.y)
+                      (r:=>
+                       (r:and
+                        (set-∈ x-y-in-X-Y.y Y)
+                        x-y-in-X-Y.x-y-pred?)
+                       x1-x2-expr))
+                 (dp-ground-set->list Y))))
+          (dp-ground-set->list X)))]))
 
 (define-syntax (at-most-1-element-of stx)
   (syntax-parse stx
     [(_ x-in-X:element-of-a-set expr)
-     #'(r:<=
-        (r:count
-         r:identity
-         (r:map
-          (r:λ (x-in-X.x)
-               (r:and
-                (set-∈ x-in-X.x x-in-X.X)
-                expr))
-          (dp-ground-set->list x-in-X.X)))
-        1)]))
+     #`(let ([X (contracted-v/kc
+                 dp-set/kc
+                 x-in-X.X
+                 #,(syntax-srcloc #'x-in-X.X)
+                 'at-most-1-element-of
+                 (list "the value quantified over"))])
+         (r:<=
+          (r:count
+           r:identity
+           (r:map
+            (r:λ (x-in-X.x)
+                 (r:and
+                  (set-∈ x-in-X.x X)
+                  expr))
+            (dp-ground-set->list X)))
+          1))]))
 
 (define-syntax (exactly-1-element-of stx)
   (syntax-parse stx
     [(_ x-in-X:element-of-a-set expr)
-     #'(r:=
-        (r:count
-         r:identity
-         (r:map
-          (r:λ (x-in-X.x)
-               (r:and
-                (set-∈ x-in-X.x x-in-X.X)
-                expr))
-          (dp-ground-set->list x-in-X.X)))
-        1)]))
+     #`(let
+           ([X (contracted-v/kc
+                 dp-set/kc
+                 x-in-X.X
+                 #,(syntax-srcloc #'x-in-X.X)
+                 'exactly-1-element-of
+                 (list "the value quantified over"))])
+         (r:=
+          (r:count
+           r:identity
+           (r:map
+            (r:λ (x-in-X.x)
+                 (r:and
+                  (set-∈ x-in-X.x X)
+                  expr))
+            (dp-ground-set->list X)))
+          1))]))
 
 (define-syntax (sum stx)
   (syntax-parse stx
     [(_ val-x (~datum for) x-in-X:element-of-a-set (~optional (~seq (~datum if) pred-x?)))
-     #`(r:let ([vals
+     #`(let ([X (contracted-v/kc
+                 dp-set/kc
+                 x-in-X.X
+                 #,(syntax-srcloc #'x-in-X.X)
+                 'sum
+                 (list "the set summing over"))])
+         (r:let ([vals
                  (r:map
                   (r:λ (x-in-X.x)
                        (r:let ([is-in-set
                                  (r:and
-                                  (set-∈ x-in-X.x x-in-X.X)
+                                  (set-∈ x-in-X.x X)
                                   #,(if (attribute pred-x?)
                                         #'pred-x?
                                         #t))])
                               ; keep symbolic union inside struct dp-integer
-                              (let ([wrapped-val-x (dp-wrap-if-raw-int val-x)])
-                                  (dp-integer (r:if is-in-set (dp-integer-val wrapped-val-x) 0)
-                                          (r:if is-in-set (dp-integer-size wrapped-val-x) 'const)))))
-                  (dp-ground-set->list x-in-X.X))])        
+                              (r:let ([wrapped-val-x
+                                       (contracted-v/kc
+                                        ; does not check if the resulting value is
+                                        ; an integer when not in set
+                                        (if is-in-set (dp-integer-w/kc #f) any/kc)
+                                        val-x
+                                        #,(syntax-srcloc #'val-x)
+                                        'sum
+                                        (list
+                                         (format "value to be summed up for set element ~v"
+                                                 x-in-X.x)))])
+                                     (dp-integer (r:if is-in-set (dp-integer-val wrapped-val-x) 0)
+                                                 (r:if is-in-set (dp-integer-size wrapped-val-x) 'const)))))
+                  (dp-ground-set->list X))])        
                (dp-integer
                 (r:apply r:+ (r:map dp-int-unwrap vals))
-                (dp-int-lst-max-size vals)))
-]))
+                (dp-int-lst-max-size vals))))]))
 
 (define-syntax (max stx)
   (syntax-parse stx
     [(_ val-x (~datum for) x-in-X:element-of-a-set (~optional (~seq (~datum if) pred-x?)))
-     #`(r:let ([vals
+     #`(let ([X (contracted-v/kc
+                 dp-set/kc
+                 x-in-X.X
+                 #,(syntax-srcloc #'x-in-X.X)
+                 'sum
+                 (list "the set maximizing over"))])
+         (r:let ([vals
                  (r:map
                   (r:λ (x-in-X.x)
                        (r:let ([is-in-set
-                                 (r:and
-                                  (set-∈ x-in-X.x x-in-X.X)
-                                  #,(if (attribute pred-x?)
-                                        #'pred-x?
-                                        #t))])
+                                (r:and
+                                 (set-∈ x-in-X.x x-in-X.X)
+                                 #,(if (attribute pred-x?)
+                                       #'pred-x?
+                                       #t))])
                               ; keep symbolic union inside struct dp-integer
-                              (let ([wrapped-val-x (dp-wrap-if-raw-int val-x)])
-                                  (dp-integer (r:if is-in-set (dp-integer-val wrapped-val-x) 0)
-                                          (r:if is-in-set (dp-integer-size wrapped-val-x) 'const)))))
+                              (r:let ([wrapped-val-x
+                                       (contracted-v/kc
+                                        ; does not check if the resulting value is
+                                        ; an integer when not in set
+                                        (if is-in-set (dp-integer-w/kc #f) any/kc)
+                                        val-x
+                                        #,(syntax-srcloc #'val-x)
+                                        'max
+                                        (list
+                                         (format "value to be considered as maximium for set element ~v"
+                                                 x-in-X.x)))])
+                                     (dp-integer (r:if is-in-set (dp-integer-val wrapped-val-x) 0)
+                                                 (r:if is-in-set (dp-integer-size wrapped-val-x) 'const)))))
                   (dp-ground-set->list x-in-X.X))])        
                (dp-integer
                 (r:apply r:max (r:map dp-int-unwrap vals))
-                (dp-int-lst-max-size vals)))]
+                (dp-int-lst-max-size vals))))]
     [(_ v ...) #'(dp-int-max v ...)]))
 
 (define-syntax (min stx)
   (syntax-parse stx
     [(_ val-x (~datum for) x-in-X:element-of-a-set (~optional (~seq (~datum if) pred-x?)))
-     #`(r:let ([vals
+     #`(let ([X (contracted-v/kc
+                 dp-set/kc
+                 x-in-X.X
+                 #,(syntax-srcloc #'x-in-X.X)
+                 'sum
+                 (list "the set minimizing over"))])
+         (r:let ([vals
                  (r:map
                   (r:λ (x-in-X.x)
                        (r:let ([is-in-set
@@ -1808,13 +2030,23 @@
                                         #'pred-x?
                                         #t))])
                               ; keep symbolic union inside struct dp-integer
-                              (let ([wrapped-val-x (dp-wrap-if-raw-int val-x)])
-                                  (dp-integer (r:if is-in-set (dp-integer-val wrapped-val-x) 0)
-                                          (r:if is-in-set (dp-integer-size wrapped-val-x) 'const)))))
+                              (r:let ([wrapped-val-x
+                                       (contracted-v/kc
+                                        ; does not check if the resulting value is
+                                        ; an integer when not in set
+                                        (if is-in-set (dp-integer-w/kc #f) any/kc)
+                                        val-x
+                                        #,(syntax-srcloc #'val-x)
+                                        'min
+                                        (list
+                                         (format "value to be considered as minimum for set element ~v"
+                                                 x-in-X.x)))])
+                                     (dp-integer (r:if is-in-set (dp-integer-val wrapped-val-x) 0)
+                                                 (r:if is-in-set (dp-integer-size wrapped-val-x) 'const)))))
                   (dp-ground-set->list x-in-X.X))])        
                (dp-integer
                 (r:apply r:min (r:map dp-int-unwrap vals))
-                (dp-int-lst-max-size vals)))]
+                (dp-int-lst-max-size vals))))]
     [(_ v ...) #'(dp-int-min v ...)]))
 
 (define-syntax (count stx)
@@ -1822,4 +2054,10 @@
     [(_ x-in-X:element-of-a-set (~datum s.t.) pred-x?)
      ; XXX: unfortunately we can not tell if the result is constant or poly
      ;      unless we have information from X
-     #'(sum (dp-integer 1 'poly) for x-in-X if pred-x?)]))
+     #`(let ([X (contracted-v/kc
+                 dp-set/kc
+                 x-in-X.X
+                 #,(syntax-srcloc #'x-in-X.X)
+                 'count
+                 (list "the set counting over"))])
+         (sum (dp-integer 1 'poly) for x-in-X if pred-x?))]))

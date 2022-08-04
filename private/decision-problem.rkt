@@ -4,6 +4,7 @@
          "verifier-type.rkt"
          "primitive-data-type.rkt"
          "core-structures.rkt"
+         "karp-contract.rkt"
          racket/stxparam
          [for-syntax racket/pretty
                      racket/require
@@ -23,11 +24,22 @@
 
 (provide decision-problem
          is-a
+         yes-instance/kc
          yes-instance/c
+         no-instance/kc
          no-instance/c)
 
 
 ; problem formulation
+(define (yes-instance/kc
+         instance/kc
+         problem-solver
+         empty-certificiate)
+  (and/kc instance/kc
+          (make-simple-contract/kc (p)
+            (not (dp-equal? empty-certificiate
+                            (problem-solver p)))
+            "expects a yes instance")))
 (define (yes-instance/c
          instance/c
          problem-solver
@@ -37,6 +49,15 @@
            (not (equal? empty-certificiate
                  (problem-solver p))))))
 
+(define (no-instance/kc
+         instance/kc
+         problem-solver
+         empty-certificiate)
+  (and/kc instance/kc
+          (make-simple-contract/kc (p)
+            (dp-equal? empty-certificiate
+                       (problem-solver p))
+            "expects a no instance")))
 (define (no-instance/c
          instance/c
          problem-solver
@@ -390,16 +411,24 @@
               [create-instance (format-id #'name "create-~a-instance" #'name)]
               [instance-type-info (format-id #'name "dp-instance-type-~a" #'name)]
               [instance-type-annotate (format-id #'name "dp-annotate-instance-type-~a" #'name)]
+              [instance/kc
+               (format-id #'name "~a-instance/kc" #'name)]
               [instance/c
                (format-id #'name "~a-instance/c" #'name)]
               ;[certificate (format-id #'name "~a-certificate" #'name)]
+              [certificate/kc
+               (format-id #'name "~a-certificate/kc" #'name)]
               [certificate/c
                (format-id #'name "~a-certificate/c" #'name)]
               [define-verifier-id (format-id #'name "define-~a-verifier" #'name)]
               [verifier-id (format-id #'name "~a-verifier" #'name)]
               [null-cert (format-id #'name "null-~a-cert" #'name)]
+              [yes/kc
+               (format-id #'name "yes-~a/kc" #'name)]
               [yes/c
                (format-id #'name "yes-~a/c" #'name)]
+              [no/kc
+               (format-id #'name "no-~a/kc" #'name)]
               [no/c
                (format-id #'name "no-~a/c" #'name)]
               [instance-generator (format-id #'name "generate-~a-instance" #'name)]
@@ -410,9 +439,11 @@
 
                (provide define/instance
                         create-instance
+                        instance/kc
                         instance/c
                         ;certificate
-                        certificate/c
+                        certificate/kc
+                        ;certificate/c
                         instance-generator
                         inst-pretty-printer
                         cert-pretty-printer
@@ -455,6 +486,31 @@
                             ))))
 
                ; nominal instance contract
+               (define instance/kc
+                 (kc-contract (v the-srcloc name context [predicate? #f])
+                   (cond
+                     [(not (dp-instance? v))
+                      (contract-fail/kc
+                       the-srcloc name
+                       (format "expects ~v" 'instance)
+                       context
+                       v predicate?)]
+                     [(not (and
+                            (list? (dp-instance-fields v))
+                            (symbol? (list-ref (dp-instance-fields v) 0))))
+                      (error "instance fields internal error")]
+                     [(not (equal? (list-ref (dp-instance-fields v) 0) 'instance))
+                      (contract-fail/kc
+                       the-srcloc name                       
+                       (format "expects ~v (not ~e)" 'instance
+                                             (list-ref (dp-instance-fields v) 0))
+                       context
+                       v predicate?)
+                      ; TODO: should squeeze this piece of information somewhere
+                      ; given (list-ref (dp-instance-fields x) 0)
+                      ]
+                     [else (if predicate? #t v)])))
+               
                (define (instance/c x)
                  (make-flat-contract
                   #:name 'instance
@@ -494,7 +550,10 @@
 
                ; add context information of which field for the error message of a blame in creating instance
                (define (add-field-context blame field-name)
-                   (blame-add-context blame (format "the ~a field of" field-name)))
+                 (blame-add-context blame (format "in the ~a field of" field-name)))
+
+               (define (add-field-context/kc context field-name)
+                 (cons (format "the ~a field" field-name) context))
 
                
                (begin-for-syntax
@@ -511,7 +570,6 @@
                       [#,(quote-syntax runtime-id) runtime-object-id])))
                  ; export the type annotation binding
                  (provide instance-type-annotate)
-
 
                  ; contracts for instance objects
                  ; Note: can not instead for every field generate a contract given the instance
@@ -543,6 +601,51 @@
 
                  (define instance-fields-name (syntax->list #'#,instance-field-lst))
 
+
+                 (define inst-ctc/kc
+                   #`(kc-contract (a-inst the-srcloc name context [predicate? #f])
+                      ; first check if a-inst is an instance
+                      ; this is a sanity check, should already be enforced with the
+                      ; define- and create-instances
+                      (when (not (dp-instance? a-inst))
+                        (error "instance contract internal error"))
+                      (define the-field-names (syntax->datum #'#,instance-fields-name))
+                      ; result is only used when predicate? is #t
+                      (define flat-result
+                        (for/and
+                          ([i (range (length the-field-names))]
+                           [field-ctc (in-list (list #,@flat-ctc-lst))]
+                           ; skip the instance name at the first element of the list
+                           [field (in-list (cdr (dp-instance-fields a-inst)))])
+                          ; error will be triggered below when predicate? is #f
+                          (field-ctc field the-srcloc name
+                                     (add-field-context/kc
+                                      context
+                                      (list-ref the-field-names i))
+                                     predicate?)))
+                      ; list of contracts constructed from value-dependent combinators
+                      (define v-dep-ctc-lst
+                        (map (λ (a-ctc-ctr) ; a contract constructor from value
+                               (a-ctc-ctr a-inst))
+                             (list #,@v-dep-ctc-lst)))
+                      ; result is only used when predicate? is #t
+                      (define v-dep-result
+                        (for/and
+                          ([i (range (length the-field-names))]
+                           [field-v-dep-ctc (in-list v-dep-ctc-lst)]
+                           ; skip the instance name at the first element of the list
+                           [field (in-list (cdr (dp-instance-fields a-inst)))])
+                          ; error will be triggered below when predicate? is #f
+                          (field-v-dep-ctc field the-srcloc name
+                                           (add-field-context/kc
+                                            context
+                                            (list-ref the-field-names i))
+                                           predicate?)))
+                      (if predicate?
+                          ; assuming flat-result and v-dep-result are real Booleans
+                          (and flat-result v-dep-result)
+                          a-inst)))
+                 
                  (define inst-ctc/c
                    #`(make-flat-contract
                         #:name 'instance
@@ -715,7 +818,22 @@
                           ; End of debug use
                         
                           ; underying object of a-var-name:id
-                          (define/contract runtime-id
+                          (define runtime-id
+                            (contracted-v/kc
+                             (un#-in-template inst-ctc/kc)
+                             (dp-instance
+                              (list 'instance
+                                    ; escape to phase 1
+                                    (un#@-in-template
+                                     (let ([val-list (syntax->list #'field-vals)])
+                                       ; field-lst defined above in phase 1
+                                       (for/list ([i (range (length field-lst))]) 
+                                         (list-ref val-list i))))))
+                             (un#-in-template (syntax-srcloc stx))
+                             'define/instance
+                             (list "the instance to be defined (check the problem definition)")
+                             ))
+                          #;(define/contract runtime-id
                             ; inst-ctc/c defined a layer above
                             (un#-in-template inst-ctc/c)
                             (dp-instance
@@ -788,7 +906,21 @@
                            ;        it might not keep the same type as now
                            (define field-lst '#,instance-field-lst)
                            (quasisyntax/loc (syntax-srcloc #'create-?-instance)
-                             (contract ; inst-ctc/c defined a layer above
+                             (contracted-v/kc
+                              (un#-in-template inst-ctc/kc)
+                              (dp-instance
+                               (list 'instance
+                                    ; escape to phase 1
+                                     (un#@-in-template
+                                      (let ([val-list (syntax->list #'field-vals)])
+                                        ; field-lst defined above in phase 1
+                                        (for/list ([i (range (length field-lst))]) 
+                                          (list-ref val-list i))))))
+                              (un#-in-template (syntax-srcloc #'create-?-instance))
+                              'create-instance
+                              (list "the instance to be created (check the problem definition)")
+                              )
+                             #;(contract ; inst-ctc/c defined a layer above
                               (un#-in-template inst-ctc/c)
                               (dp-instance
                                (list 'instance
@@ -838,8 +970,8 @@
                ;---
                ; End of debug use
 
-               (define (certificate/c a-instance)
-                 (and/c
+               (define (certificate/kc a-instance)
+                 (and/kc
                   #,(stx-subst-with-id-table
                      (dp-stx-info-field cert-parsed-type ctc)
                      ctc-subst-tbl)
@@ -943,8 +1075,8 @@
                            (dp-stx-type-info-field (free-id-table-ref parsed a-field) generator)
                             )))
 
-               (define/contract (instance-generator)
-                 (-> instance/c)
+               (define/contract/kc (instance-generator)
+                 (->k () instance/kc)
                  (dp-instance
                   (let rec ([retry-remaining 10])
                    ;(with-handlers ([exn:fail?
@@ -964,7 +1096,17 @@
                        ))));)
 
                ; pretty-printer
-               (define (inst-pretty-printer x)
+               (define/contract/kc (inst-pretty-printer x)
+                 (->k ([x instance/kc]) any/kc)
+                 (displayln "--------------start-------------")
+                 (displayln 'instance)
+                 #,@(for/list ([i (range (length instance-field-lst))])
+                      (let ([cur-field-name (list-ref instance-field-lst i)])
+                        #`(begin
+                            (display (format "~a:\n" '#,cur-field-name))
+                            (pretty-print (list-ref (dp-instance-fields x) (+ #,i 1))))))
+                 (displayln "---------------end--------------"))
+               #;(define (inst-pretty-printer x)
                  (unless (instance/c x)
                    (raise-argument-error 'inst-pretty-printer (format "~a" 'instance) x))
                  (displayln "--------------start-------------")
@@ -990,8 +1132,8 @@
                     ; define the id here
                     #:with solver-id-here (format-id stx "~a-solver" #'name)
                     #:with null-cert-here (format-id stx "~a" #'null-cert)
-                    #:with yes/c-here (format-id stx "yes-~a/c" #'name)
-                    #:with no/c-here (format-id stx "no-~a/c" #'name)
+                    #:with yes/kc-here (format-id stx "yes-~a/kc" #'name)
+                    #:with no/kc-here (format-id stx "no-~a/kc" #'name)
                     #:with checker-body
                            #`((define-syntax arg-inst
                                 (instance-type-annotate #'arg-inst-runtime))
@@ -1002,44 +1144,47 @@
                               ; at the evaluation ``checker-body'', the expression inside #,@ evaluates
                               ; and filled in the template of #`(....)
                               ; the whole #,@(....) part is generated by the ``decision-problem''
-                              #,@(dp-verifier-rewrite #'(body (... ...))
-                                                      (cons #'arg-cert
-                                                            ; #,(....) escapes when generating the
-                                                            ; #'define-verifier-id macro,
-                                                            ; the evaluated #,(....) will be part of the
-                                                            ; code of the #'define-verifier
+                              #,@(dp-verifier-rewrite
+                                  #'(body (... ...))
+                                  (cons #'arg-cert
+                                        ; #,(....) escapes when generating the
+                                        ; #'define-verifier-id macro,
+                                        ; the evaluated #,(....) will be part of the
+                                        ; code of the #'define-verifier
                                                             
-                                                            ; uncomment below to see certificate kv-type for debugging
-                                                            ;(raise-syntax-error 'cert-type (dp-stx-info-field cert-parsed-type kv-type-object))
+                                        ; uncomment below to see certificate kv-type for debugging
+                                        #;(raise-syntax-error 'cert-type
+                                           (dp-stx-info-field cert-parsed-type kv-type-object))
 
-                                                            #,(dp-stx-info-field cert-parsed-type kv-type-object)
-                                                            )
-                                                      (list #,@(for/list ([a-field instance-field-lst])
-                                                                ; key the ``cons'' in the code
-                                                                ; fill in the two positions in the template #`(cons #'$pos1 $pos2)
-                                                                ; with the result of evaulating expression inside #,(....)
-                                                                ; the expression inside #,(....) is evaluated in the phase 1
-                                                                ; related to the position of ``decision-problem''
-                                                                #`(cons #'#,a-field
-                                                                        #,(dp-stx-type-info-field
-                                                                           (free-id-table-ref parsed a-field)
-                                                                           kv-type-object))))
-                                                      ))
+                                        #,(dp-stx-info-field cert-parsed-type kv-type-object)
+                                        )
+                                  (list
+                                   #,@(for/list ([a-field instance-field-lst])
+                                        ; key the ``cons'' in the code
+                                        ; fill in the two positions in the template #`(cons #'$pos1 $pos2)
+                                        ; with the result of evaulating expression inside #,(....)
+                                        ; the expression inside #,(....) is evaluated in the phase 1
+                                        ; related to the position of ``decision-problem''
+                                        #`(cons #'#,a-field
+                                                #,(dp-stx-type-info-field
+                                                   (free-id-table-ref parsed a-field)
+                                                   kv-type-object))))
+                                  ))
                     #`(begin
 
                         
                         (provide verifier-id-here
                                  solver-id-here
                                  null-cert-here
-                                 yes/c-here
-                                 no/c-here)
+                                 yes/kc-here
+                                 no/kc-here)
 
                         
                         ; verifier interface with contract exposed to the user
-                        (define/contract (verifier-id-here arg-inst-runtime arg-cert)
-                          (->i ([the-inst instance/c]
-                                [the-cert (the-inst) (certificate/c the-inst)])
-                               [_ boolean?]) ; should we enforce boolean? here?
+                        (define/contract/kc (verifier-id-here arg-inst-runtime arg-cert)
+                          (->k ([the-inst instance/kc]
+                                [the-cert (the-inst) (certificate/kc the-inst)])
+                               any/kc) ; should we enforce boolean? here?
                           (r-checker-for-verifying arg-inst-runtime arg-cert))
 
                         ; verifier to feed the solver (not protected with contracts)
@@ -1060,8 +1205,8 @@
                             #,@#'checker-body))
 
                         ; deriving the solver
-                        (define/contract (solver-id-here a-instance)
-                          (-> instance/c any/c)
+                        (define/contract/kc (solver-id-here a-instance)
+                          (->k ([x instance/kc]) any/kc)
                           ; annotate type information to the instance-id-with-type-info
                           (define-syntax instance-id-with-type-info
                             (instance-type-annotate #'a-instance))
@@ -1191,7 +1336,8 @@
                             (r:solve       ; -- comment out this line for debugging
                              
                              (r:assert   ; run the checker on symp-cert and add constraints to solver
-                              (r:and
+                              ;(pretty-print ; for further debugging, kept in comment in normal use
+                               (r:and
                                ; (DONE) TODO: add certificate structural constraint
                                ;              specified in the problem definition (See above)
                                ; (check-cert-constr sym-cert)
@@ -1201,7 +1347,7 @@
                                 struct-constr-lst)
                                (r-checker-for-solving
                                 a-instance
-                                sym-cert)))
+                                sym-cert))) ; leave the paren on this line to match pretty-print
                              
                              )) ; -- comment out this line for debugging
 
@@ -1228,14 +1374,14 @@
                         (define null-cert-here
                           #,#'#,(dp-stx-info-field cert-parsed-type null-object))
                         ; contract for yes and no instance of the problem
-                        (define yes/c-here
-                          (yes-instance/c instance/c
+                        (define yes/kc-here
+                          (yes-instance/kc instance/kc
                                solver-id-here
                                null-cert-here
                                ;#,#'#,(dp-stx-info-field cert-parsed-type null-object)
                                ))
-                        (define no/c-here
-                          (no-instance/c instance/c
+                        (define no/kc-here
+                          (no-instance/kc instance/kc
                                solver-id-here
                                null-cert-here
                                ;#,#'#,(dp-stx-info-field cert-parsed-type null-object))

@@ -4,6 +4,7 @@
   (prefix-in r: rosette/safe)
 
   "../private/problem-definition-core.rkt"
+  "../private/karp-contract.rkt"
   [for-syntax racket/syntax
               racket/struct
               syntax/parse
@@ -16,7 +17,10 @@
  (struct-out dp-mapping)
  dp-mapping/c
  dp-mapping-d/c
+ dp-mapping/kc
+ dp-mapping-d/kc
  mapping
+ lookup-safe
  lookup
  dom
 
@@ -118,6 +122,8 @@
                 sol)))])
 
 
+
+
 (define (sym-hash-ref htbl hk-lst x)
   (if (empty? hk-lst)
       (error "key not exists")
@@ -135,7 +141,7 @@
          [(a-mapping key) (cons #'(a-mapping key) τb-v)])]
       [(args-τ (_ (tMapping τb-k τb-v)) ('SYM b-k))
        (syntax-parser
-         [(a-mapping key) (cons #'(lookup a-mapping key) τb-v)])]
+         [(a-mapping key) (cons #'(lookup-safe a-mapping key) τb-v)])]
       [(args-τ (_ (tMapping τb-k τb-v)) ('SYM τb-k2))
        (syntax-parser
          [(a-mapping key) (raise-syntax-error #f
@@ -148,7 +154,7 @@
                                 (format "invalid operation ~a" type-lst)
                                 #'(m arg0 ...))])])))
 
-(define (lookup a-mapping k)
+(define (lookup-safe a-mapping k)
   (let* ([H (dp-mapping-H a-mapping)]
          [first-v (car (hash-values H))]
          [merge-func (if (dp-mergeable? first-v)
@@ -157,10 +163,21 @@
     (merge-func (sym-hash-ref H (hash-keys H) k)
                 (dp-mapping-el-rep a-mapping))))
 
+
 ; domain accessor
 (kv-func-type-annotate dom ((tMapping τb-d τb-r) (tSetOf τb-d)))
-(define (dom a-mapping)
+(define/contract/kc (dom a-mapping)
+  (->k ([m (dp-mapping/kc any/kc any/kc)]) any/kc)
   (dp-list->set (hash-keys (dp-mapping-H a-mapping))))
+
+(define/contract/kc (lookup a-mapping k)
+  (->k ([m (dp-mapping/kc any/kc any/kc)]
+        [k (m) (make-simple-contract/kc (v)
+             (set-∈ v (dom m))
+             (format "expects an element in the domain of ~e" m))]) any/kc)
+  (if (dp-symbolic? k)
+      (raise "the domain element referred in mapping can not contains value to be solved")
+      (hash-ref (dp-mapping-H a-mapping) k)))
 
 ; contract combinator for mapping
 ; with domain (from) elements and range (to) elements satisfying given contract, internal
@@ -178,6 +195,38 @@
      (andmap
       to/c
       (hash-values (dp-mapping-H a-map))))))
+
+(define (mapping-dom-rng/kc from/kc to/kc)
+  (kc-contract (a-mapping the-srcloc name context [predicate? #f])
+     (let ([res
+         (and
+          (andmap
+           (λ (k)
+             (from/kc k the-srcloc 'mapping (cons "an element in the domain" context) predicate?))
+           (hash-keys (dp-mapping-H a-mapping)))
+          (andmap
+           (λ (k)
+             (to/kc (hash-ref (dp-mapping-H a-mapping) k)
+                    the-srcloc 'mapping (cons (format "the image of ~e" k) context) predicate?))
+           (hash-keys (dp-mapping-H a-mapping))))])
+       (if predicate?
+           (if res #t #f)
+           a-mapping))))
+
+(define (dp-mapping/kc from/kc to/kc)
+  (and/kc
+   (make-simple-contract/kc (v)
+     (dp-mapping? v)
+     "expects a mapping")
+   (make-simple-contract/kc (v)
+     ((struct/c dp-mapping
+       (hash/c any/c any/c #:flat? #t)
+        any/c ; XXX: this is not ideal
+               ; what is equivalent to (equal?/c #f) ?
+        (one-of/c #f)) v)
+      "invalid mapping structure")
+   (mapping-dom-rng/kc from/kc to/kc))
+  )
 
 ; construct a contract factory for contract of mapping
 ; with domain (from) elements and range (to) elements satisfying specific contracts, internal
@@ -199,6 +248,11 @@
            (and (from-ctc k)
                 (to-ctc (hash-ref H k))))
          (hash-keys H))))))
+
+(define ((dp-mapping-d/kc from-ctc-d to-ctc-d) v . rest)
+  (let ([from-ctc (apply from-ctc-d (cons v rest))]
+        [to-ctc (apply to-ctc-d (cons v rest))])
+    (mapping-dom-rng/kc from-ctc to-ctc)))
 
 ; create a solvable symbolic mapping from domain to codomain, internal, non-solvable(?)
 (define (dp-symbolic-mapping from-set to-symbolic-constr)
@@ -340,47 +394,50 @@
                        #f
                        "disjoint can only be used on sets"
                        #'type-desc)
-                      #`(and/c
-                         (dp-mapping/c #,from-ctc #,to-ctc)
-                         (λ (m)
+                      #`(and/kc
+                         (dp-mapping/kc #,from-ctc #,to-ctc)
+                         (make-simple-contract/kc (m)
                            (andmap
                             (λ (k1)
                               (andmap
                                (λ (k2)
                                  (implies
-                                  (not (equal? k1 k2))
-                                  (equal?
+                                  (not (dp-equal? k1 k2))
+                                  (dp-equal?
                                    (set-size
                                     (set-∩ (hash-ref (dp-mapping-H m) k1)
                                            (hash-ref (dp-mapping-H m) k2)))
                                    0)))
                                (hash-keys (dp-mapping-H m))))
-                            (hash-keys (dp-mapping-H m))))))
-                     #`(dp-mapping/c #,from-ctc #,to-ctc))]
+                            (hash-keys (dp-mapping-H m)))
+                            "expects an mapping whose elements in range are disjoint")))
+                     #`(dp-mapping/kc #,from-ctc #,to-ctc))]
                 ; end of temporary patch
                 [mapping-v-dep-ctc #`(λ (a-inst)
-                                       (λ (a-mapping)
-                                         (and
-                                          ; domain constraints
-                                          ; all mappings are total now
+                                       (and/kc
+                                        ; domain constraints
+                                        ; all mappings are total now
+                                        (make-simple-contract/kc (a-mapping)
                                           (set-equal?
                                            (dom a-mapping)
                                            (#,from-accessor
                                             #,(trace-upstream-to-field from-upstream #'a-inst)))
-                                          ; for partial mapping -- not in use
-                                          ; the domain is reflected on field defined
-                                          #;(if (dp-mapping-defined a-mapping)
+                                          (format "expects a mapping with domain equals to ~e"
+                                            (#,from-accessor
+                                             #,(trace-upstream-to-field from-upstream #'a-inst))))
+                                        ; for partial mapping -- not in use
+                                        ; the domain is reflected on field defined
+                                        #;(if (dp-mapping-defined a-mapping)
                                               (set-equal?
                                                (dp-list->set (hash-keys (dp-mapping-H (dp-mapping-defined a-mapping))))
                                                (#,from-accessor
                                                 #,(trace-upstream-to-field from-upstream #'a-inst)))
                                               #t)
-                                          ;---------
-                                          ; end of not-in-use
+                                        ;---------
+                                        ; end of not-in-use
                                           
-                                          ; element-type constraint
-                                          (((dp-mapping-d/c #,from-v-dep-ctc #,to-v-dep-ctc) a-inst) a-mapping)
-                                          )))]
+                                        ; element-type constraint
+                                        ((dp-mapping-d/kc #,from-v-dep-ctc #,to-v-dep-ctc) a-inst)))]
                 [to-type-symbolic-constructor (dp-stx-info-field to-el-type symbolic-constructor)]
                 [to-type-solution-decoder (dp-stx-info-field to-el-type solution-decoder)]
                 ; ids in referred parts

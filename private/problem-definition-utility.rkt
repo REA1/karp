@@ -142,7 +142,7 @@
              #f
              (raise-syntax-error
               #f
-              "non-integral field can not be used as size"
+              "only a field of natural can be used as size"
               maybe-size-stx)))]
       [(exact-positive-integer?
         (syntax-e maybe-size-stx)) (syntax-e maybe-size-stx)]

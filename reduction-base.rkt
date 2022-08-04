@@ -8,6 +8,7 @@
   ; TODO(?): move this to decision-problem,
   ;          so that everything comes from decision problem
   [only-in "private/dp-type-info.rkt" func-type-info]
+  "private/karp-contract.rkt"
 
   [only-in racket/list
            (argmax lst-argmax)
@@ -16,11 +17,13 @@
   racket/require
   racket/require-syntax
   [prefix-in r: rosette]
-  [for-syntax syntax/parse
+  [for-syntax racket/list
+              syntax/parse
               racket/syntax
               syntax/id-table
               syntax/to-string]
   racket/stxparam
+  racket/syntax-srcloc
   #;[for-meta 2 racket/base
               syntax/parse
               racket/syntax])
@@ -180,14 +183,23 @@
               (dp-int-wrap (+ (index-of mem-list v) 1) 'poly)))
       mem-list))))
 
-(define (index-in e a-set)
+(define/contract/kc (index-in e a-set)
+  (->k ([e any/kc] [a-set dp-set/kc]) any/kc)
   ; XXX: unfortunately we can not tell if the result is constant or poly
   ;      unless we know whether a-set is constant
   (hash-ref (dp-set-element-index a-set) (dp-wrap-if-raw-int e)))
 
-(define (element-of-index i a-set)
+(define/contract/kc (element-of-index i a-set)
+  (->k ([i (and/kc
+            (dp-natural-w/kc #f)
+            (make-simple-contract/kc (v)
+              (dp-int-ge v 1)
+              "index needs to be at least 1")
+            dp-int-not-exp-size/c)]
+        [a-set dp-set/kc]) any/kc)
+  (list-ref (dp-set-members->list a-set) (- (dp-int-unwrap i) 1))
   ; TODO: change this to contract checking
-  (if (dp-int-not-exp-size/c i)
+  #;(if (dp-int-not-exp-size/c i)
       (list-ref (dp-set-members->list a-set) (- (dp-int-unwrap i) 1))
       (error "can not access an index expoential to the input length")))
 
@@ -240,10 +252,22 @@
     [(_ {elem-expr (~seq , elem-expr1) ... (~seq (~datum for) x-in-X:element-of-a-set) ...+
                    (~optional (~seq (~datum if) pred-elem))})
      ; Question: how to simplify the pred-elem part here?
+     #:with (x-in-X/kc ...)
+     (let ([xs (syntax->list #'(x-in-X.x ...))]
+           [inds (syntax->list #'((~? x-in-X.ind #f) ...))]
+           [Xs (syntax->list #'(x-in-X.X ...))])
+       (for/list ([i (range 1 (+ (length Xs) 1))]
+                  [an-x xs]
+                  [an-ind inds]
+                  [an-X Xs])
+         #`[#,(if (syntax-e an-ind) #`(#,an-x #:index #,an-ind) an-x) ∈ (contracted-v/kc
+            dp-set/kc #,an-X (syntax-srcloc #'#,an-X) 'for/set
+            (list (format "the ~v~s set" #,i
+                          '#,(ordinal-numeral i))))]))
      #`(dp-list->set
         (for/set-core ((dp-wrap-if-raw-int elem-expr)
                        (dp-wrap-if-raw-int elem-expr1) ...)
-                       x-in-X ...
+                       x-in-X/kc ...
          #,@(if (attribute pred-elem)
                 #'(#:if pred-elem)
                 #'(#:if))))]))
@@ -316,6 +340,18 @@
   (syntax-parser
     [(_ (set-id0:id ...+) ({el-expr0 (~seq , el-expr) ...} ...+) (~seq (~datum for) xn-in-Xn:element-of-a-set) ...+
         (~optional (~seq (~datum if) pred-expr)))
+     #:with (xn-in-Xn/kc ...)
+     (let ([xs (syntax->list #'(xn-in-Xn.x ...))]
+           [inds (syntax->list #'((~? xn-in-Xn.ind #f) ...))]
+           [Xs (syntax->list #'(xn-in-Xn.X ...))])
+       (for/list ([i (range 1 (+ (length Xs) 1))]
+                  [an-x xs]
+                  [an-ind inds]
+                  [an-X Xs])
+         #`[#,(if (syntax-e an-ind) #`(#,an-x #:index #,an-ind) an-x) ∈ (contracted-v/kc
+            dp-set/kc #,an-X (syntax-srcloc #'#,an-X) 'for/set
+            (list (format "the ~v~s set" #,i
+                          '#,(ordinal-numeral i))))]))
      #'(begin
          (define set-id0
            (dp-list->set
@@ -323,7 +359,7 @@
                 ((dp-wrap-if-raw-int el-expr0)
                  (dp-wrap-if-raw-int el-expr)
                  ...)
-              xn-in-Xn ... #:if (~? pred-expr)))) ...)]))
+              xn-in-Xn/kc ... #:if (~? pred-expr)))) ...)]))
 
 
 #;(define-syntax for/set
@@ -370,7 +406,13 @@
 (define-syntax all-pairs-in
   (syntax-parser
     [(_ X (~optional (~and #:ordered ordered)))
-     #`(for/set {(tpl x y) for [(x #:index j) ∈ X] for [(y #:index i) ∈ X]
+     #:with X/kc
+     #`(contracted-v/kc
+        dp-set/kc X
+        (syntax-srcloc #'X)
+        'all-pairs-in
+        (list "the value getting all pairs from"))
+     #`(for/set {(tpl x y) for [(x #:index j) ∈ X/kc] for [(y #:index i) ∈ X/kc]
                             if #,(if (attribute ordered)
                                      #'(not (dp-equal? x y))
                                      #'(< (dp-int-unwrap j) (dp-int-unwrap i)))})]))
@@ -378,7 +420,13 @@
 (define-syntax all-triplets-in
   (syntax-parser
     [(_ X (~optional (~and #:ordered ordered)))
-     #`(for/set {(tpl x y z) for [(z #:index k) ∈ X] for [(x #:index j) ∈ X] for [(y #:index i) ∈ X]
+     #:with X/kc
+     #`(contracted-v/kc
+        dp-set/kc X
+        (syntax-srcloc #'X)
+        'all-pairs-in
+        (list "the value getting all triplets from"))
+     #`(for/set {(tpl x y z) for [(z #:index k) ∈ X/kc] for [(x #:index j) ∈ X/kc] for [(y #:index i) ∈ X/kc]
                             if #,(if (attribute ordered)
                                      #'(and
                                         (not (dp-equal? x y))
@@ -392,38 +440,71 @@
 (define-syntax find-one
   (syntax-parser
     [(_ x-in-X:element-of-a-set (~optional (~seq (~datum s.t.) pred-x?)))
+     #:with X/kc
+     #`(contracted-v/kc
+        dp-set/kc x-in-X.X
+        (syntax-srcloc #'x-in-X.X)
+        'find-one
+        (list "the value to search from"))
      #`(let ([res (r:findf (r:λ (x-in-X.x)
                                (r:and
-                                (set-∈ x-in-X.x x-in-X.X)
+                                (set-∈ x-in-X.x X/kc)
                                 #,(if (attribute pred-x?) #'pred-x? #t)))
-                          (dp-ground-set->list x-in-X.X))])
-         (if res
-             res
-             (error "find-one: not found")))]))
+                           (dp-ground-set->list X/kc))])
+         ; XXX: the result will be incorrect when finding the boolean value #f
+         (contracted-v/kc
+          (make-simple-contract/kc (v)
+            v
+            "can not find such an element")
+          res (syntax-srcloc #'x-in-X.X) 'find-one (list "the set to search from")))]))
 
 (define-syntax argmax
   (syntax-parser
     [(_ x-expr x-in-X:element-of-a-set (~optional (~seq (~datum s.t.) pred-x?)))
+     #:with X/kc
+     #`(contracted-v/kc
+        dp-set/kc x-in-X.X
+        (syntax-srcloc #'x-in-X.X)
+        'argmax
+        (list "the value to taken argmax from"))
      #`(let ([set-member-lst
               (dp-set-members->list
-               (for/set {(tuple x-expr x-in-X.x) for [x-in-X.x in x-in-X.X] if (~? pred-x? #t)}))])
+               (for/set {(tuple x-expr x-in-X.x) for [x-in-X.x in X/kc] if (~? pred-x? #t)}))])
          (snd
           (lst-argmax
-           (λ (x-in-X.x) (dp-int-unwrap (fst x-in-X.x)))
+           (λ (x-in-X.x) (dp-int-unwrap
+                          #`(constracted-v/kc
+                             (dp-integer-w/c #f)
+                             (fst x-in-X.x)
+                             'argmax
+                             (syntax-srcloc #'x-expr)
+                             (list "an value to be considered maximum"))))
            set-member-lst)))]))
 
 (define-syntax arg-kth-max
   (syntax-parser
     [(_ k x-expr x-in-X:element-of-a-set (~optional (~seq (~datum s.t.) pred-x?)))
-     #`(let rec ([n (dp-int-unwrap
-                     ; TODO: change this to contract checking
-                     (if (dp-int-not-exp-size/c k)
-                         k
-                         (error "can not get the k-th largest where k is expoential to input length")))]
+     #:with X/kc
+     #`(contracted-v/kc
+        dp-set/kc x-in-X.X
+        (syntax-srcloc #'x-in-X.X)
+        'arg-kth-max
+        (list "the value to taken k-th max from"))
+     #:with k/kc
+     #`(contracted-v/kc
+        (and/kc (dp-natural-w/kc #f) dp-int-not-exp-size/kc)
+        k (syntax-srcloc #'k) 'arg-kth-max
+        (list "the index k"))
+     #`(let rec ([n (dp-int-unwrap k/kc)]
                  [max-xs (set )])
          (let ([cur-max
-                (argmax x-expr
-                        [x-in-X.x in (set-minus x-in-X.X max-xs)]
+                (argmax #`(constracted-v/kc
+                             (dp-integer-w/c #f)
+                             x-expr
+                             'arg-kth-max
+                             (syntax-srcloc #'x-expr)
+                             (list "an value to be considered k-th maximum"))
+                        [x-in-X.x in (set-minus X/kc max-xs)]
                         (~? (~@ s.t. pred-x?)))])
            (if (<= n 1)
                cur-max
@@ -433,26 +514,56 @@
 (define-syntax argmin
   (syntax-parser
     [(_ x-expr x-in-X:element-of-a-set (~optional (~seq (~datum s.t.) pred-x?)))
+     #:with X/kc
+     #`(contracted-v/kc
+        dp-set/kc x-in-X.X
+        (syntax-srcloc #'x-in-X.X)
+        'argmin
+        (list "the value to taken argmin from"))
+     #:with x-expr/kc
+     #`(contracted-v/kc
+        (dp-integer-w/c #f) x-in-X.X
+        (syntax-srcloc #'x-in-X.X)
+        'argmin
+        (list "the value to taken argmin from"))
      #`(let ([set-member-lst
               (dp-set-members->list
-               (for/set {(tuple x-expr x-in-X.x) for [x-in-X.x in x-in-X.X] if (~? pred-x? #t)}))])
+               (for/set {(tuple x-expr x-in-X.x) for [x-in-X.x in X/kc] if (~? pred-x? #t)}))])
          (snd
           (lst-argmin
-           (λ (x-in-X.x) (dp-int-unwrap (fst x-in-X.x)))
+           (λ (x-in-X.x) (dp-int-unwrap
+                          #`(constracted-v/kc
+                             (dp-integer-w/c #f)
+                             (fst x-in-X.x)
+                             'arg-min
+                             (syntax-srcloc #'x-expr)
+                             (list "an value to be considered minimum"))))
            set-member-lst)))]))
 
 (define-syntax arg-kth-min
   (syntax-parser
     [(_ k x-expr x-in-X:element-of-a-set (~optional (~seq (~datum s.t.) pred-x?)))
-     #`(let rec ([n (dp-int-unwrap
-                     ; TODO: change this to contract checking
-                     (if (dp-int-not-exp-size/c k)
-                         k
-                         (error "can not get the k-th smallest where k is expoential to input length")))]
+     #:with X/kc
+     #`(contracted-v/kc
+        dp-set/kc x-in-X.X
+        (syntax-srcloc #'x-in-X.X)
+        'arg-kth-max
+        (list "the value to taken k-th min from"))
+     #:with k/kc
+     #`(contracted-v/kc
+        (and/kc (dp-natural-w/kc #f) dp-int-not-exp-size/kc)
+        k (syntax-srcloc #'k) 'arg-k-min
+        (list "the index k"))
+     #`(let rec ([n (dp-int-unwrap k/kc)]
                  [min-xs (set )])
          (let ([cur-min
-                (argmin x-expr
-                        [x-in-X.x in (set-minus x-in-X.X min-xs)]
+                (argmin #`(constracted-v/kc
+                             (dp-integer-w/c #f)
+                             x-expr
+                             'arg-kth-min
+                             (syntax-srcloc #'x-expr)
+                             (list "an value to be considered k-th minimum"))
+                        [x-in-X.x in (set-minus X/kc min-xs)]
                         (~? (~@ s.t. pred-x?)))])
            (if (<= n 1)
                cur-min
@@ -486,6 +597,7 @@
                         the-one)) )
          #'(list (r:findf (r:λ (x) pred?) X)))]))
 
+; not in use, use for/set instead
 (define-syntax find-all
   (syntax-parser
     #:datum-literals (in as s.t.)
@@ -549,14 +661,19 @@
         [(list? X) (combinations X 2)]))
 
 ; range constructors
-(define (ints-from-to from to)
-  ; TODO: convert to contract checking
-  (if (dp-int-not-exp-size/c to)
-      (dp-list->set
-       (map
-        (λ (a-raw-int) (dp-int-wrap a-raw-int (dp-int-size-of to)))
-        (range from (+ (dp-int-unwrap to) 1))))
-      (error "can not create a set of exponential many integers")))
+(define/contract/kc (ints-from-to from to)
+  (->k ([from any/kc]
+        [to (and/kc
+            (dp-natural-w/kc #f)
+            #;(make-simple-contract (v)
+              (dp-int-ge v 1)
+              "index needs to be at least 1")
+            dp-int-not-exp-size/c)])
+       any/kc)
+  (dp-list->set
+   (map
+    (λ (a-raw-int) (dp-int-wrap a-raw-int (dp-int-size-of to)))
+    (range from (+ (dp-int-unwrap to) 1)))))
 
 
 ;; macro
@@ -688,14 +805,14 @@
      #:with num-tests (if (attribute n-test) #'n-test #'10)
      #:with cont-after-fail? (if (attribute cont-after-fail) #'cont-after-fail #'#f)
      #:with set-seed-stmt (if (attribute seed) #'(when seed (random-seed seed)) #'(begin ))
-     (with-syntax ([s-instance/c (format-id #'s "~a-instance/c" #'s)]
-                   [t-instance/c (format-id #'t "~a-instance/c" #'t)]
-                   [yes-s/c (format-id #'s "yes-~a/c" #'s)]
-                   [no-s/c (format-id #'s "no-~a/c" #'s)]
-                   [yes-t/c (format-id #'t "yes-~a/c" #'t)]
-                   [no-t/c (format-id #'t "no-~a/c" #'t)]
-                   [s-certificate/c (format-id #'s "~a-certificate/c" #'s)]
-                   [t-certificate/c (format-id #'t "~a-certificate/c" #'t)]
+     (with-syntax ([s-instance/kc (format-id #'s "~a-instance/kc" #'s)]
+                   [t-instance/kc (format-id #'t "~a-instance/kc" #'t)]
+                   [yes-s/kc (format-id #'s "yes-~a/kc" #'s)]
+                   [no-s/kc (format-id #'s "no-~a/kc" #'s)]
+                   [yes-t/kc (format-id #'t "yes-~a/kc" #'t)]
+                   [no-t/kc (format-id #'t "no-~a/kc" #'t)]
+                   [s-certificate/kc (format-id #'s "~a-certificate/kc" #'s)]
+                   [t-certificate/kc (format-id #'t "~a-certificate/kc" #'t)]
                    [s-solver (format-id #'s "~a-solver" #'s)]
                    [t-solver (format-id #'t "~a-solver" #'t)]
                    [s-cert-checker (format-id #'s "~a-verifier" #'s)]
@@ -729,7 +846,7 @@
                            [a-s-cert (s-solver a-s-inst)]
                            [the-t-inst (s->t-construction a-s-inst)])
                       ; check if s->t-constr yields a t-instance
-                      (unless (t-instance/c the-t-inst)
+                      (unless ((make-predicate/kc t-instance/kc) the-t-inst)
                         (displayln "Test failed: result not a to-problem instance")
                         (displayln "From-problem instance:")
                         (s-inst-pretty-printer a-s-inst)
@@ -740,9 +857,9 @@
                       ; check yes ~~> yes and no ~~> no
                       (define a-t-cert (t-solver the-t-inst))
                       ; when source is no
-                      (when (equal? a-s-cert s-null-cert)
+                      (when (dp-equal? a-s-cert s-null-cert)
                         ; check if target is also no
-                        (unless (equal? a-t-cert t-null-cert)
+                        (unless (dp-equal? a-t-cert t-null-cert)
                           (displayln "Test failed: no-instance mapped to a yes-instance")
                           (displayln "From-problem instance:")
                           (s-inst-pretty-printer a-s-inst)
@@ -753,9 +870,9 @@
                           (unless cont-after-fail?
                             (return a-s-inst))))
                       ; when target is no
-                      (when (equal? a-t-cert t-null-cert)
+                      (when (dp-equal? a-t-cert t-null-cert)
                         ; check if source is also no
-                        (unless (equal? a-s-cert s-null-cert)
+                        (unless (dp-equal? a-s-cert s-null-cert)
                           (begin
                             (displayln "Test failed: yes-instance mapped to a no-instance")
                             (displayln "From-problem instance:")
@@ -774,7 +891,9 @@
                                             a-s-inst
                                             a-s-cert))
                         ; check forward-certificate-construction                   
-                        (unless (t-cert-checker the-t-inst the-t-cert)
+                        (unless (and
+                                 ((make-predicate/kc (t-certificate/kc the-t-inst)) the-t-cert)
+                                 (t-cert-checker the-t-inst the-t-cert))
                           (displayln "Test failed: result not a certificate of the to-problem instance")
                           (displayln "From-problem instance:")
                           (s-inst-pretty-printer a-s-inst)
@@ -792,7 +911,9 @@
                                             a-s-inst
                                             a-t-cert))
                         ; check backward-certificate-construction                
-                        (unless (s-cert-checker a-s-inst the-s-cert)
+                        (unless (and
+                                 ((make-predicate/kc (s-certificate/kc a-s-inst)) the-s-cert)
+                                 (s-cert-checker a-s-inst the-s-cert))
                           (displayln "Test failed: result not a certificate of the from-problem instance")
                           (displayln "From-problem instance:")
                           (s-inst-pretty-printer a-s-inst)
@@ -860,4 +981,3 @@
 
 (define (random-natural-cardinal a b)
   (gen-random-natural a b 'poly))
-

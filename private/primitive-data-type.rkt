@@ -1,6 +1,7 @@
 #lang racket
 
 (require "verifier-type.rkt"
+         "karp-contract.rkt"
          "problem-definition-utility.rkt"
          racket/random
          [for-syntax racket/struct
@@ -16,10 +17,6 @@
  fresh-symbolic-int
 )
 
-(provide symbol
-         natural
-         boolean
-         gen-random-natural)
 
 ;; symbolic
 (define (fresh-symbolic-bool)
@@ -31,6 +28,10 @@
   x)
 
 ;; symbol
+
+(provide symbol
+         symbol/kc
+         gen-random-sym-el)
 
 ; type object representing Symbol
 ; the opaque element type, including symbols and dont-care elements
@@ -52,6 +53,10 @@
       [(_) #'(ty-Symbol)]))
 )
 
+(define-simple-contract/kc symbol/kc (v)
+  (symbol? v)
+  "expects a symbol")
+
 (define-syntax (symbol stx)
   (if (dp-parse-table)
       ; only valid for inst
@@ -61,8 +66,8 @@
            type 'symbol
            kv-type-object #'(tSymbol)
            atomic? #t
-           ctc #'symbol?
-           v-dep-ctc #'v-dep-any/c
+           ctc #'symbol/kc
+           v-dep-ctc #'v-dep-any/kc
            type-data '()
            accessors '()
            generator #`(λ (a-inst)
@@ -85,6 +90,8 @@
 
 ;; Boolean
 
+(provide boolean)
+
 ; type object representing Bool
 (begin-for-syntax
   (provide tBool)
@@ -104,6 +111,10 @@
   
 )
 
+(define-simple-contract/kc boolean/kc (v)
+  (boolean? v)
+  "expects a boolean")
+
 (define-syntax (boolean stx)
   (syntax-parse stx
     [(_)
@@ -114,8 +125,8 @@
           type 'boolean
           kv-type-object #'(tBool)
           atomic? #t
-          ctc #'boolean?
-          v-dep-ctc #'v-dep-any/c
+          ctc #'boolean/kc
+          v-dep-ctc #'v-dep-any/kc
           type-data '()
           accessors '()
           symbolic-constructor #'(λ (a-inst) dp-symbolic-boolean)
@@ -170,9 +181,14 @@
  dp-int-wrap
  dp-int-unwrap
  dp-int-size-of
+ dp-int-not-exp-size/kc
  dp-int-not-exp-size/c
  dp-int-max-size
  dp-int-lst-max-size
+
+ dp-integer-w/kc
+ dp-natural-w/kc
+ 
  ; everything from below should be renamed and exposed to the user
  dp-int-plus
  dp-int-minus
@@ -188,8 +204,10 @@
  dp-expt
  dp-mod
  dp-even?
- dp-odd?
- )
+ dp-odd?)
+
+(provide natural
+         gen-random-natural)
 
 (define (dp-int-eq x y [recursive-equal? #f])
   (let ([raw-x (dp-int-unwrap x)]
@@ -235,9 +253,36 @@
 
 (define dp-null-integer (dp-integer #f #f))
 
+; check and wrap int if necessary
+(define (dp-integer-w/kc [size 'const])
+  (kc-contract (v the-srcloc name context [predicate? #f])
+    (if (dp-integer? v)
+        (if (and (integer? (dp-integer-val v)) (symbol? (dp-integer-size v)))
+            ; overriding the size if size specified
+            (if size (dp-int-wrap (dp-int-unwrap v) size) v)
+            (error "integer internal error"))
+        (if (integer? v)
+            (dp-int-wrap v (if size size 'const))
+            (contract-fail/kc the-srcloc name "expects an integer" context v predicate?)))))
+
 (define (dp-integer/c x)
   (or/c (struct/c dp-integer integer? symbol?)
         (λ (x) (and (not (dp-integer-val x)) (not (dp-integer-size x))))))
+
+(define (dp-natural-w/kc [size 'const])
+  (kc-contract (v the-srcloc name context [predicate? #f])
+    (if (dp-integer? v)
+        (if (and (integer? (dp-integer-val v)) (symbol? (dp-integer-size v)))
+            (if (natural? (dp-integer-val v))
+                ; overriding the size if size specified
+                (if size (dp-int-wrap (dp-int-unwrap v) size) v)
+                (contract-fail/kc
+                 the-srcloc name "expects a natural number (nonegative integer)"
+                 context v predicate?))
+            (error "integer internal error"))
+        (if (natural? v)
+            (dp-int-wrap v (if size size 'const))
+            (contract-fail/kc the-srcloc name "expects a natural number" context v predicate?)))))
 
 (define (dp-natural/c x)
   (or/c (struct/c dp-integer natural? symbol?)
@@ -305,59 +350,73 @@
       #f
       #t))
 
+(define-simple-contract/kc dp-int-not-exp-size/kc (v)
+  (equal? (dp-int-size-of v) 'exp)
+  "expects a value being polynomial of the input length")
+
 (define (dp-int-lst-max-size lst)
   (let ([size-lst (map dp-int-size-of lst)])
     (r:cond [(r:member 'exp size-lst) 'exp]
           [(r:member 'poly size-lst) 'poly]
           [r:else 'const])))
 
-(define (dp-int-plus . xs)
+(define/contract/kc (dp-int-plus . xs)
+  (->k #:rest [xs (dp-integer-w/kc #f)] any/kc)
   (let ([raw-xs (map (λ (x) (dp-int-unwrap x)) xs)])
     (dp-integer (r:apply r:+ raw-xs) (dp-int-lst-max-size xs))))
 
-(define (dp-int-minus x y)
+(define/contract/kc (dp-int-minus x y)
+  (->k ([x (dp-integer-w/kc #f)] [y (dp-integer-w/kc #f)]) any/kc)
   (let ([raw-x (dp-int-unwrap x)]
         [raw-y (dp-int-unwrap y)])
   (dp-integer (r:- raw-x raw-y) (dp-int-max-size x y))))
 
-(define (dp-int-mult . xs)
+(define/contract/kc (dp-int-mult . xs)
+  (->k #:rest [xs (dp-integer-w/kc #f)] any/kc)
   (let ([raw-xs (map (λ (x) (dp-int-unwrap x)) xs)])
   (dp-integer (r:apply r:* raw-xs) (dp-int-lst-max-size xs))))
 
-(define (dp-int-gt x y)
+(define/contract/kc (dp-int-gt x y)
+  (->k ([x (dp-integer-w/kc #f)] [y (dp-integer-w/kc #f)]) boolean/kc)
   (let ([raw-x (dp-int-unwrap x)]
         [raw-y (dp-int-unwrap y)])
     (r:> raw-x raw-y)))
 
-(define (dp-int-ge x y)
+(define/contract/kc (dp-int-ge x y)
+  (->k ([x (dp-integer-w/kc #f)] [y (dp-integer-w/kc #f)]) boolean/kc)
   (let ([raw-x (dp-int-unwrap x)]
         [raw-y (dp-int-unwrap y)])
     (r:>= raw-x raw-y)))
 
-(define (dp-int-lt x y)
+(define/contract/kc (dp-int-lt x y)
+  (->k ([x (dp-integer-w/kc #f)] [y (dp-integer-w/kc #f)]) boolean/kc)
   (let ([raw-x (dp-int-unwrap x)]
         [raw-y (dp-int-unwrap y)])
     (r:< raw-x raw-y)))
 
-(define (dp-int-le x y)
+(define/contract/kc (dp-int-le x y)
+  (->k ([x (dp-integer-w/kc #f)] [y (dp-integer-w/kc #f)]) boolean/kc)
   (let ([raw-x (dp-int-unwrap x)]
         [raw-y (dp-int-unwrap y)])
     (r:<= raw-x raw-y)))
 
-(define (dp-int-max x0 . xs)
+(define/contract/kc (dp-int-max x0 . xs)
+  (->k #:rest [xs (dp-integer-w/kc #f)] any/kc)
   (let ([raw-x0xs (map (λ (x) (dp-int-unwrap x)) (cons x0 xs))])
   ; XXX: Is it possible a int has larger size but smaller value?
   ; size of the result is set as the maximum size among all integer, regarless of value
   (dp-integer (r:apply r:max raw-x0xs) (dp-int-lst-max-size (cons x0 xs)))))
 
-(define (dp-int-min x0 . xs)
+(define/contract/kc (dp-int-min x0 . xs)
+  (->k #:rest [xs (dp-integer-w/kc #f)] any/kc)
   (let ([raw-x0xs (map (λ (x) (dp-int-unwrap x)) (cons x0 xs))])
   ; XXX: Is it possible a int has larger size but smaller value?
   ; size of the result is set as the maximum size among all integer, regarless of value
   (dp-integer (r:apply r:min raw-x0xs) (dp-int-lst-max-size (cons x0 xs)))))
 
 ; operators in reduction
-(define (dp-expt x y)
+(define/contract/kc (dp-expt x y)
+  (->k ([x (dp-integer-w/kc #f)] [y (dp-integer-w/kc #f)]) any/kc)
   (let ([raw-x (dp-int-unwrap x)]
         [raw-y (dp-int-unwrap y)])
     (dp-integer (expt raw-x raw-y)
@@ -376,17 +435,20 @@
                         'exp))
                 )))
 
-(define (dp-mod x y)
+(define/contract/kc (dp-mod x y)
+  (->k ([x (dp-integer-w/kc #f)] [y (dp-integer-w/kc #f)]) any/kc)
   (let ([raw-x (dp-int-unwrap x)]
         [raw-y (dp-int-unwrap y)])
     ; XXX: size can be made more precise?
     (dp-integer (modulo raw-x raw-y) (dp-int-max-size x y))))
 
-(define (dp-even? x)
+(define/contract/kc (dp-even? x)
+  (->k ([x (dp-integer-w/kc #f)]) any/kc)
   (let ([raw-x (dp-int-unwrap x)])
     (even? raw-x)))
 
-(define (dp-odd? x)
+(define/contract/kc (dp-odd? x)
+  (->k ([x (dp-integer-w/kc #f)]) any/kc)
   (let ([raw-x (dp-int-unwrap x)])
     (odd? raw-x)))
 
@@ -442,12 +504,15 @@
          ; same for inst and cert env
          (dp-stx-type-desc
           (generate-temporary #'integer)
-          type 'integer
+          type (if (attribute pv-natural) 'natural 'integer)
           kv-type-object #'(tInt)
           atomic? #t
-          ctc (if (attribute pv-natural) #'dp-natural/c #'dp-integer/c)
+          ctc (let ([size (if (attribute pv-numeric) #''exp #''poly)])
+                (if (attribute pv-natural)
+                  #`(dp-natural-w/kc #,size)
+                  #`(dp-integer-w/kc #,size)))
           ;wrapper #`(λ (x) (dp-integer x #,(if ())))
-          v-dep-ctc #'v-dep-any/c
+          v-dep-ctc #'v-dep-any/kc
           type-data '()
           accessors '()
           ; Note: integers can not be used as solvable

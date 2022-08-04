@@ -3,8 +3,11 @@
 (require [except-in "../reduction-base.rkt" define]
          [rename-in "mapping.rkt" [mapping m-mapping] ]
          [for-syntax syntax/parse
-                     syntax/stx]
-         racket/stxparam)
+                     syntax/stx
+                     racket/list]
+         "../private/karp-contract.rkt"
+         racket/stxparam
+         racket/syntax-srcloc)
 
 
 (provide mapping
@@ -83,13 +86,24 @@
 (define-syntax mapping
   (syntax-parser
     [(_ (~seq [x (~or (~datum in) (~datum ∈)) X] (~optional (~seq (~datum where) pred-x)) (~datum ~>) x-expr) ...+)
+     #:with (X/kc ...)
+     (let ([Xs (syntax->list #'(X ...))])
+       (for/list ([i (range 1 (+ (length Xs) 1))]
+                  [an-X Xs])
+         #`(contracted-v/kc
+            dp-set/kc #,an-X (syntax-srcloc #'#,an-X) 'mapping
+            (list (format "the ~v~s set" #,i
+                          '#,(ordinal-numeral i))))))
      #`(build-mapping-core
         (hash) ; init curr-H to empty hash 
-        (for/hash ([k (dp-set-members->list (set-∪ X ...))]) (values k #f)) ; init curr-defined to indicate nothing is defined
-        (x X (~? pred-x) x-expr) ...)]
+        (for/hash ([k (dp-set-members->list (set-∪ X/kc ...))]) (values k #f)) ; init curr-defined to indicate nothing is defined
+        (x X/kc (~? pred-x) x-expr) ...)]
     [(_ sth ...) #'(m-mapping sth ...)]))
 
 ; simple testing
-#;(mapping [x ∈ (set 0 1 2 3 4 5)] where (and (> x 0)
-                                            (not (defined? curr (- x 1))))
-           ~> (* 2 x))
+#;(mapping [x ∈ (set 0 1 2 3 4 5)] where (and (dp-int-gt x 0)
+                                            (not (defined? curr (dp-int-minus x 1))))
+           ~> (dp-int-mult 2 x))
+
+#;(mapping [x ∈ (set 0 1 2 3)] ~> (dp-int-mult 2 x)
+         [x ∈ (set 3 4 5)] ~> (dp-int-mult 3 x))

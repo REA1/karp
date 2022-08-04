@@ -4,7 +4,6 @@
   (prefix-in r: rosette)
   racket/random
 
-  "../private/problem-definition-core.rkt"
   [for-syntax racket/list
               racket/struct
               racket/syntax
@@ -12,7 +11,10 @@
               syntax/id-table
               racket/match]
   [for-meta 2 racket/base
-              syntax/parse])
+              syntax/parse]
+  "../private/primitive-data-type.rkt"
+  "../private/problem-definition-core.rkt"
+  "../private/karp-contract.rkt")
 
 (provide
  identity
@@ -28,6 +30,11 @@
  literal/c
  clause/c
  cnf/c
+ 
+ var/kc
+ literal/kc
+ clause/kc
+ cnf/kc
  literal
  neg
  underlying-var
@@ -101,6 +108,7 @@
 
 
 (define var/c symbol?)
+(define var/kc symbol/kc)
 
 ; fallback to Racket
 ; see also: dp-set
@@ -114,7 +122,24 @@
 
 (define (literal x)
   (dp-literal x #f))
-(define (neg l-or-x)
+
+(define literal/c
+  (struct/c dp-literal var/c boolean?))
+(define literal/kc
+  (and/kc
+   (make-simple-contract/kc (v)
+     (dp-literal? v)
+     "expects a literal (in the context of Boolean formula)")
+   (make-simple-contract/kc (v)
+     ((struct/c dp-literal symbol? boolean?) v)
+     "internal error: invalid literal structure")))
+
+(define/contract/kc (neg l-or-x)
+  (->k ([l-or-x
+         (or/kc
+          "expects a literal or a variable (in the context of Boolean formula)"
+          literal/kc
+          var/kc)]) any/kc)
   (r:if (dp-literal? l-or-x)
         (dp-literal (dp-literal-x l-or-x) (not (dp-literal-neg? l-or-x)))
         (dp-literal l-or-x #t)))
@@ -139,8 +164,6 @@
 
 ;(r:struct neg (x) #:transparent)
 
-(define literal/c
-  (struct/c dp-literal var/c boolean?))
 
 ;(define literal/c (or/c var/c (struct/c neg var/c)))
 ; Note: currently the order of variables counts when comparing equality 
@@ -162,6 +185,15 @@
 (define clause/c
   (struct/c dp-cnf-clause (listof literal/c)))
 
+(define clause/kc
+  (and/kc
+   (make-simple-contract/kc (v)
+     (dp-cnf-clause? v)
+     "expects a clause (in the context of Boolean formula)")
+   (make-simple-contract/kc (v)
+     ((struct/c dp-cnf-clause (listof literal/c)) v)
+     "internal error: invalid clause structure")))
+
 #;(define clause/c
     (listof literal/c))
 
@@ -175,31 +207,46 @@
           #:methods gen:custom-write
           [(define write-proc
             (r:λ (the-cnf port mode)
-                 (fprintf port "[cnf\n~a\n]" (string-join (map
-                                                  (λ (c) (format " (~a)" c))
-                                                  (dp-cnf-lst the-cnf)) "\n"))))])
+                 (fprintf port "[cnf\n~a\n]"
+                          (string-join (map
+                                        (λ (c) (format " (~a)" c))
+                                        ; convert to and back to get the order correct
+                                        (dp-set-members->list (dp-list->set (dp-cnf-lst the-cnf)))) "\n"))))])
 (define cnf/c
   (struct/c dp-cnf (listof clause/c)))
 
-(define/contract (create-cnf a-set-of-clause)
-  (-> (dp-setof/c clause/c) cnf/c)
+(define cnf/kc
+  (and/kc
+   (make-simple-contract/kc (v)
+     (dp-cnf v)
+     "expects a CNF (in the context of Boolean formula)")
+   (make-simple-contract/kc (v)
+     ((struct/c dp-cnf (listof clause/c)) v)
+     "internal error: invalid CNF structure")))
+
+(define/contract/kc (create-cnf a-set-of-clause)
+  (->k ([x (dp-setof/kc clause/kc)]) any/kc)
   (dp-cnf (dp-set-members->list a-set-of-clause)))
 
 #;(define cnf/c (listof clause/c))
 
-(define (underlying-var a-literal)
+(define/contract/kc (underlying-var a-literal)
+  (->k ([x literal/kc]) any/kc)
   (dp-literal-x a-literal))
 (kv-func-type-annotate underlying-var ((tLiteral) (tSymbol)) "a literal")
 
-(define (positive-literal? a-literal)
+(define/contract/kc (positive-literal? a-literal)
+  (->k ([x literal/kc]) any/kc)
   (r:not (dp-literal-neg? a-literal)))
 (kv-func-type-annotate positive-literal? ((tLiteral) (tBool)) "a literal")
 
-(define (negative-literal? a-literal)
+(define/contract/kc (negative-literal? a-literal)
+  (->k ([x literal/kc]) any/kc)
   (dp-literal-neg? a-literal))
 (kv-func-type-annotate negative-literal? ((tLiteral) (tBool)) "a literal")
 
-(define (literal-neg-of? l1 l2)
+(define/contract/kc (literal-neg-of? l1 l2)
+  (->k ([x literal/kc] [y literal/kc]) any/kc)
   (r:and (same-variable? l1 l2)
          (r:xor (dp-literal-neg? l1) (dp-literal-neg? l2))))
 (kv-func-type-annotate literal-neg-of? ((tLiteral) (tLiteral) (tBool)) "two literal")
@@ -208,7 +255,8 @@
   (cond [(var/c a-literal) a-literal]
         [else (neg-x a-literal)]))
 
-(define (same-variable? literal-1 literal-2)
+(define/contract/kc (same-variable? literal-1 literal-2)
+  (->k ([x literal/kc] [y literal/kc]) any/kc)
   (r:equal? (underlying-var literal-1) (underlying-var literal-2)))
 (kv-func-type-annotate same-variable? ((tLiteral) (tLiteral) (tBool)) "two literal")
 
@@ -242,7 +290,8 @@
               (r:not (r:hash-ref assignment (neg-x l)))))
     a-clause)))
 
-(define (clauses-of a-cnf)
+(define/contract/kc (clauses-of a-cnf)
+  (->k ([x cnf/kc]) any/kc)
   a-cnf)
 (kv-func-type-annotate clauses-of ((tCNF) (tSetOf (tClause))) "a CNF")
 
@@ -280,7 +329,8 @@
 
 ; for reduction only
 ; the type system will choose now in the verifier
-(define (literals-of a-sth)
+(define/contract/kc (literals-of a-sth)
+  (->k ([x (or/kc "expects a CNF or a clause" cnf/kc clause/kc)]) any/kc)
   (r:cond [(dp-cnf-clause? a-sth) (as-set a-sth)]
           [(dp-cnf? a-sth) (dp-list->set
                             (r:apply
@@ -328,7 +378,8 @@
 ; get all variables of a cnf or clause as a set
 ; a-sth: (or/c clause? dp-cnf?)
 ; -> (dp-set-of var/c[?])
-(define (vars-of a-sth)
+(define/contract/kc (vars-of a-sth)
+  (->k ([x (or/kc "expects a CNF or a clause" cnf/kc clause/kc)]) any/kc)
   (dp-list->set (vars-of-list a-sth)))
 
 #;(define (vars-of a-sth)
@@ -509,15 +560,15 @@
              (let* ([maybe-arity (if (attribute arity) (syntax-e #'arity) #f)]
                     [el-ctc (if maybe-arity
                                 ; XXX: use clause/c or simply dp-set/c?
-                                #`(λ (a-clause)
-                                   (and (clause/c a-clause)
-                                        ; maybe better changing to =/c, see also ```set''' in dp-core
-                                        (equal? (set-size a-clause) #,maybe-arity)))
-                                #'clause/c)]
-                    [el-v-dep-ctc #'v-dep-any/c]
+                                #`(and/kc
+                                   clause/kc
+                                   ; maybe better changing to =/c, see also ```set''' in dp-core
+                                   (dp-set-size=-d/kc #,maybe-arity))
+                                #'clause/kc)]
+                    [el-v-dep-ctc #'v-dep-any/kc]
                     ; XXX: check cnf/c or dp-setof/c?
-                    [ctc #`(dp-setof/c #,el-ctc)]
-                    [v-dep-ctc #'v-dep-any/c])
+                    [ctc #`(dp-setof/kc #,el-ctc)]
+                    [v-dep-ctc #'v-dep-any/kc])
                (dp-stx-type-desc
                 (generate-temporary 'cnf)
                 type 'cnf
@@ -536,8 +587,8 @@
                                        type 'boolean-variable
                                        kv-type-object #'(tSymbol)
                                        atomic? #t
-                                       ctc #'var/c
-                                       v-dep-ctc #'v-dep-any/c
+                                       ctc #'var/kc
+                                       v-dep-ctc #'v-dep-any/kc
                                        type-data '()
                                        accessors '())))
                 accessors (list (cons 'set #'identity)
@@ -576,8 +627,8 @@
             type 'set
             kv-type-object #'(tSetOf (tSymbol))
             atomic? #f
-            ctc #`(dp-setof/c #,(dp-stx-info-field var-type-desc ctc))
-            v-dep-ctc #`(dp-setof-d/c #,(dp-stx-info-field var-type-desc v-dep-ctc))    
+            ctc #`(dp-setof/kc #,(dp-stx-info-field var-type-desc ctc))
+            v-dep-ctc #`(dp-setof-d/kc #,(dp-stx-info-field var-type-desc v-dep-ctc))    
             upstream #'parent-name
             upstream-accessor upstream-accessor
             type-data (list (cons 'el-type var-type-desc))
@@ -589,3 +640,4 @@
 
 (kv-func-type-annotate variables-of ((or (tCNF) (tClause)) (tSetOf (tSymbol)))
                        "a CNF or a clause")
+
