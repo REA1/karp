@@ -33,7 +33,7 @@
  has-edge?-v-safe
  has-edge?-uv-safe
  vertex/c
- edge-u/c
+ ;edge-u/c
 
  ;make-edge
  e-u
@@ -47,11 +47,11 @@
  endpoints
  
  dp-graph-V-M?
- dp-graph/c
+ ;dp-graph/c
  subgraph-of?
  dp-graph-u-invariant?
- dp-graph-u/c
- dp-graph-d/c
+ ;dp-graph-u/c
+ ;dp-graph-d/c
  dp-graph-u/kc
  dp-graph-d/kc
  empty-graph
@@ -215,7 +215,7 @@
           (hash-keys (hash-ref (dp-graph-M g) u))))
     (hash-keys (dp-graph-M g)))))
 
-(define dp-graph/c
+#;(define dp-graph/c
   (and/c
    (struct/c dp-graph
              (hash/c
@@ -264,7 +264,7 @@
   "invalid undirected graph: adjancency matrix is asymmetric")
 
 ; contract for undirected graph
-(define dp-graph-u/c
+#;(define dp-graph-u/c
   (and/c
    dp-graph/c
    dp-graph-u-invariant?
@@ -282,7 +282,7 @@
    dp-graph-u-invariant/kc))
 
 ; contract for directed graph
-(define dp-graph-d/c
+#;(define dp-graph-d/c
   (and/c
    dp-graph/c
    (λ (g) (dp-graph-directed? g))))
@@ -290,7 +290,7 @@
 (define dp-graph-d/kc
   (and/kc
    (make-simple-contract/kc (g)
-    (not (dp-graph? g))
+    (dp-graph? g)
     "expects a directed graph")
    dp-graph/kc
    (make-simple-contract/kc (v)
@@ -328,7 +328,7 @@
 (define vertex/c any/c)
 (provide edge-u/kc edge-d/kc)
 ;(define edge-u/c (struct/c edge-u (cons/c vertex/c vertex/c)))
-(define edge-u/c (and/c
+#;(define edge-u/c (and/c
                   (dp-setof/c vertex/c)
                   (λ (e) (<= (set-size e) 2))))
 (define-simple-contract/kc edge-u/kc (v)
@@ -410,7 +410,7 @@
 
 (define/contract/kc (remove-edge g e)
   (->k ([g dp-graph/kc]
-        [e (g) (case
+        [e (g) (cond
                 [(dp-graph-directed? g) edge-d/kc]
                 [else edge-u/kc])])
        any/kc)
@@ -418,7 +418,7 @@
 
 (define/contract/kc (remove-edges g es)
   (->k ([g dp-graph/kc]
-        [e (g) (case
+        [e (g) (cond
                 [(dp-graph-directed? g) (dp-setof/kc edge-d/kc)]
                 [else (dp-setof/kc edge-u/kc)])])
        any/kc)
@@ -762,7 +762,7 @@
   (->k ([g dp-graph/kc]
         [u (g) (make-simple-contract/kc (v)
                  (set-∈ v (get-vertices g))
-                 "expects an vertex of the given graph")])
+                 (format "expects an vertex of the given graph:\n ~e" g))])
        any/kc)
   (dp-set (hash-ref (dp-graph-M g) u)))
 (provide neighbors-typed-rewriter)
@@ -784,7 +784,7 @@
   (->k ([g dp-graph/kc]
         [u (g) (make-simple-contract/kc (v)
                  (set-∈ v (get-vertices g))
-                 "expects an vertex of the given graph")])
+                 (format "expects an vertex of the given graph:\n ~e" g))])
        any/kc)
   (dp-set-filter
    (r:λ (u)
@@ -821,21 +821,21 @@
   (->k ([g dp-graph/kc]
         [u (g) (make-simple-contract/kc (v)
                  (set-∈ v (get-vertices g))
-                 "expects an vertex of the given graph")])
+                 (format "expects an vertex of the given graph:\n ~e" g))])
        any/kc)
   (set-size (neighbors g u)))
 (define/contract/kc (in-degree g u)
   (->k ([g dp-graph/kc]
         [u (g) (make-simple-contract/kc (v)
                  (set-∈ v (get-vertices g))
-                 "expects an vertex of the given graph")])
+                 (format "expects an vertex of the given graph:\n ~e" g))])
        any/kc)
   (set-size (in-neighbors g u)))
 (define/contract/kc (out-degree g u)
   (->k ([g dp-graph/kc]
         [u (g) (make-simple-contract/kc (v)
                  (set-∈ v (get-vertices g))
-                 "expects an vertex of the given graph")])
+                 (format "expects an vertex of the given graph:\n ~e" g))])
        any/kc)
   (set-size (neighbors g u)))
 ;; get edge as pair from graph/c
@@ -1412,18 +1412,18 @@
            (r:λ (v)
                 (r:implies
                  (hash-ref g-V-hash v)
-                 (r:and (r:<= (in-degree g v)
+                 (r:and (r:<= (dp-int-unwrap (in-degree g v))
                               (if (dp-graph-directed? g) 1 2))
-                        (r:<= (out-degree g v)
+                        (r:<= (dp-int-unwrap (out-degree g v))
                               (if (dp-graph-directed? g) 1 2))))
                 ;(r:<= (set-size (set-∪ (out-neighbors g v) (in-neighbors g v))) 2)
                 )
            (hash-keys g-V-hash))
-          (r:= (in-degree g s) (if (dp-graph-directed? g) 0 1))
-          (r:= (out-degree g s) 1)  
+          (r:= (dp-int-unwrap (in-degree g s)) (if (dp-graph-directed? g) 0 1))
+          (r:= (dp-int-unwrap (out-degree g s)) 1)  
           ;(r:= (set-size (set-∪ (out-neighbors g s) (in-neighbors g s))) 1)
-          (r:= (in-degree g t) 1)
-          (r:= (out-degree g t) (if (dp-graph-directed? g) 0 1))
+          (r:= (dp-int-unwrap (in-degree g t)) 1)
+          (r:= (dp-int-unwrap (out-degree g t)) (if (dp-graph-directed? g) 0 1))
           ;(r:= (set-size (set-∪ (out-neighbors g t) (in-neighbors g t))) 1)
           ))]))
 (kv-func-type-annotate st-path? ((tGraph _) (tSymbol) (tSymbol) (tBool)) "a graph")
@@ -1939,7 +1939,7 @@
                                        (raise-syntax-error #f "object has no vertices" #'value-with-vertex-name)
                                        upstream-accessor))]
               [v-dep-ctc #`(λ (a-inst)
-                             (make-simple-contract (a-vertex)
+                             (make-simple-contract/kc (a-vertex)
                                (set-∈
                                 a-vertex
                                 (#,upstream-accessor

@@ -52,8 +52,8 @@
 (provide
  (r:struct-out dp-set)
  dp-set/c
- dp-setof/c
- dp-setof-d/c
+ ;dp-setof/c
+ ;dp-setof-d/c
 
  dp-set/kc
  dp-setof/kc
@@ -61,12 +61,14 @@
  dp-subset-of-d/kc
 
  dp-set-with-size=/kc
+ dp-set-size=-d/kc
  
  a-set
  set-∈
  set-∉
  set-∈-safe
  set-∉-safe
+ set-∈-d/kc
  dp-list->hash
  dp-list->set
  dp-list-list->set
@@ -575,6 +577,11 @@
   (->k ([x any/kc] [y dp-set/kc]) any/kc)
   (r:not (set-∈ a-element a-set)))
 
+(define (set-∈-d/kc the-set)
+  (make-simple-contract/kc (v)
+    (set-∈ v the-set)
+    (format "expects an element of ~v" the-set)))
+
 ; safe versions
 (define (set-∈-safe a-element a-set)
   (∃ [v ∈ (as-set a-set)]
@@ -1028,9 +1035,12 @@
        (list-ref (dp-tuple-lst a-tuple) i)))
     (range (length (dp-tuple-lst a-tuple))))))
 
-(define ((dp-tuple-d/kc el-ctcs-d) v . rest) ; curried shorthand
+(define ((dp-tuple-d/kc . el-ctcs-d) v . rest) ; curried shorthand
   ; produce contract of elements given dependent values
-  (let ([el-ctcs (apply el-ctcs-d (cons v rest))])
+  (let ([el-ctcs
+         (map
+          (λ (a-ctc-d) (apply a-ctc-d (cons v rest)))
+          el-ctcs-d)])
     (and/kc
      dp-tuple-any/kc
      (kc-contract (v the-srcloc name context [predicate? #f])
@@ -1729,7 +1739,12 @@
               [upstream-accessor (dp-stx-type-info-accessor-ref parent-set-type 'set)]
               [ctc (dp-stx-info-field parsed-el-type ctc)]
               [v-dep-ctc #`(λ (a-inst)
-                             (λ (a-el)
+                             (and/kc
+                              #,(dp-stx-info-field parsed-el-type v-dep-ctc)
+                              (set-∈-d/kc
+                               (#,upstream-accessor
+                                #,(trace-upstream-to-field upstream #'a-inst))))
+                             #;(make-simple-contract/kc (a-el)
                                (and
                                 (#,(dp-stx-info-field parsed-el-type v-dep-ctc) a-el)
                                 (set-∈ a-el (#,upstream-accessor
@@ -1822,7 +1837,7 @@
                  (list "the value quantified over"))])
          (r:andmap
           (r:λ (x-in-X.x)
-               (r:=>
+               (r:implies
                 (set-∈ x-in-X.x X)
                 expr))
           (dp-ground-set->list X)))]
@@ -1841,11 +1856,11 @@
                  (list "the value quantified over"))])
          (r:andmap
           (r:λ (x-y-in-X-Y.x)
-               (r:=>
+               (r:implies
                 (set-∈ x-y-in-X-Y.x X)
                 (r:andmap
                  (r:λ (x-y-in-X-Y.y)
-                      (r:=>
+                      (r:implies
                        (r:and
                         (set-∈ x-y-in-X-Y.y Y)
                         x-y-in-X-Y.x-y-pred?)
@@ -1883,11 +1898,11 @@
                  (list "the value quantified over"))])
          (r:ormap
           (r:λ (x-y-in-X-Y.x)
-               (r:=>
+               (r:and
                 (set-∈ x-y-in-X-Y.x X)
                 (r:ormap
                  (r:λ (x-y-in-X-Y.y)
-                      (r:=>
+                      (r:and
                        (r:and
                         (set-∈ x-y-in-X-Y.y Y)
                         x-y-in-X-Y.x-y-pred?)
@@ -1936,6 +1951,29 @@
             (dp-ground-set->list X)))
           1))]))
 
+
+#;(define-syntax (sum stx)
+  (syntax-parse stx
+    [(_ val-x (~datum for) x-in-X:element-of-a-set (~optional (~seq (~datum if) pred-x?)))
+     #`(r:let ([vals
+                 (r:map
+                  (r:λ (x-in-X.x)
+                       (r:let ([is-in-set
+                                 (r:and
+                                  (set-∈ x-in-X.x x-in-X.X)
+                                  #,(if (attribute pred-x?)
+                                        #'pred-x?
+                                        #t))])
+                              ; keep symbolic union inside struct dp-integer
+                              (let ([wrapped-val-x (dp-wrap-if-raw-int val-x)])
+                                  (dp-integer (r:if is-in-set (dp-integer-val wrapped-val-x) 0)
+                                          (r:if is-in-set (dp-integer-size wrapped-val-x) 'const)))))
+                  (dp-ground-set->list x-in-X.X))])        
+               (dp-integer
+                (r:apply r:+ (r:map dp-int-unwrap vals))
+                (dp-int-lst-max-size vals)))
+]))
+
 (define-syntax (sum stx)
   (syntax-parse stx
     [(_ val-x (~datum for) x-in-X:element-of-a-set (~optional (~seq (~datum if) pred-x?)))
@@ -1956,7 +1994,10 @@
                                         #t))])
                               ; keep symbolic union inside struct dp-integer
                               (r:let ([wrapped-val-x
-                                       (contracted-v/kc
+                                       ; the contract below is disabled in solver environment
+                                       ; add the wrapping to ensure the result is wrapped
+                                       (dp-wrap-if-raw-int
+                                        (contracted-v/kc
                                         ; does not check if the resulting value is
                                         ; an integer when not in set
                                         (if is-in-set (dp-integer-w/kc #f) any/kc)
@@ -1965,10 +2006,15 @@
                                         'sum
                                         (list
                                          (format "value to be summed up for set element ~v"
-                                                 x-in-X.x)))])
+                                                 x-in-X.x))))])
+                                     #;(pretty-print wrapped-val-x)
+                                     #;(pretty-print is-in-set)
+                                     #;(pretty-print (r:boolean? is-in-set))
+                                     #;(pretty-print
+                                      (r:* (r:if is-in-set 1 0) (dp-integer-val wrapped-val-x)))
                                      (dp-integer (r:if is-in-set (dp-integer-val wrapped-val-x) 0)
                                                  (r:if is-in-set (dp-integer-size wrapped-val-x) 'const)))))
-                  (dp-ground-set->list X))])        
+                  (dp-ground-set->list X))])
                (dp-integer
                 (r:apply r:+ (r:map dp-int-unwrap vals))
                 (dp-int-lst-max-size vals))))]))
@@ -1993,16 +2039,19 @@
                                        #t))])
                               ; keep symbolic union inside struct dp-integer
                               (r:let ([wrapped-val-x
-                                       (contracted-v/kc
-                                        ; does not check if the resulting value is
-                                        ; an integer when not in set
-                                        (if is-in-set (dp-integer-w/kc #f) any/kc)
-                                        val-x
-                                        #,(syntax-srcloc #'val-x)
-                                        'max
-                                        (list
-                                         (format "value to be considered as maximium for set element ~v"
-                                                 x-in-X.x)))])
+                                       ; the contract below is disabled in solver environment
+                                       ; add the wrapping to ensure the result is wrapped
+                                       (dp-wrap-if-raw-int
+                                        (contracted-v/kc
+                                         ; does not check if the resulting value is
+                                         ; an integer when not in set
+                                         (if is-in-set (dp-integer-w/kc #f) any/kc)
+                                         val-x
+                                         #,(syntax-srcloc #'val-x)
+                                         'max
+                                         (list
+                                          (format "value to be considered as maximium for set element ~v"
+                                                  x-in-X.x))))])
                                      (dp-integer (r:if is-in-set (dp-integer-val wrapped-val-x) 0)
                                                  (r:if is-in-set (dp-integer-size wrapped-val-x) 'const)))))
                   (dp-ground-set->list x-in-X.X))])        
@@ -2031,16 +2080,19 @@
                                         #t))])
                               ; keep symbolic union inside struct dp-integer
                               (r:let ([wrapped-val-x
-                                       (contracted-v/kc
-                                        ; does not check if the resulting value is
-                                        ; an integer when not in set
-                                        (if is-in-set (dp-integer-w/kc #f) any/kc)
-                                        val-x
-                                        #,(syntax-srcloc #'val-x)
-                                        'min
-                                        (list
-                                         (format "value to be considered as minimum for set element ~v"
-                                                 x-in-X.x)))])
+                                       ; the contract below is disabled in solver environment
+                                       ; add the wrapping to ensure the result is wrapped
+                                       (dp-wrap-if-raw-int
+                                        (contracted-v/kc
+                                         ; does not check if the resulting value is
+                                         ; an integer when not in set
+                                         (if is-in-set (dp-integer-w/kc #f) any/kc)
+                                         val-x
+                                         #,(syntax-srcloc #'val-x)
+                                         'min
+                                         (list
+                                          (format "value to be considered as minimum for set element ~v"
+                                                  x-in-X.x))))])
                                      (dp-integer (r:if is-in-set (dp-integer-val wrapped-val-x) 0)
                                                  (r:if is-in-set (dp-integer-size wrapped-val-x) 'const)))))
                   (dp-ground-set->list x-in-X.X))])        

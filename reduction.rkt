@@ -17,7 +17,10 @@
           dp-int-max
           dp-int-min
           dp-expt
-          dp-mod)
+          dp-quotient
+          dp-mod
+          dp-even?
+          dp-odd?)
          (rename-out [dp-int-plus +]
                      [dp-int-minus -]
                      [dp-int-mult *]
@@ -26,11 +29,13 @@
                      [dp-int-lt <]
                      [dp-int-le <=]
                      [dp-int-eq =]                    
-                     [dp-equal? equal?])
+                     [dp-equal? equal?]
+                     [dp-quotient /]
+                     [dp-mod mod]
+                     [dp-even? even?]
+                     [dp-odd? odd])
          require
          provide
-         even?
-         odd?
          and
          or
          not

@@ -195,7 +195,7 @@
             (make-simple-contract/kc (v)
               (dp-int-ge v 1)
               "index needs to be at least 1")
-            dp-int-not-exp-size/c)]
+            dp-int-not-exp-size/kc)]
         [a-set dp-set/kc]) any/kc)
   (list-ref (dp-set-members->list a-set) (- (dp-int-unwrap i) 1))
   ; TODO: change this to contract checking
@@ -473,8 +473,8 @@
          (snd
           (lst-argmax
            (λ (x-in-X.x) (dp-int-unwrap
-                          #`(constracted-v/kc
-                             (dp-integer-w/c #f)
+                          (contracted-v/kc
+                             (dp-integer-w/kc #f)
                              (fst x-in-X.x)
                              'argmax
                              (syntax-srcloc #'x-expr)
@@ -498,8 +498,8 @@
      #`(let rec ([n (dp-int-unwrap k/kc)]
                  [max-xs (set )])
          (let ([cur-max
-                (argmax #`(constracted-v/kc
-                             (dp-integer-w/c #f)
+                (argmax (contracted-v/kc
+                             (dp-integer-w/kc #f)
                              x-expr
                              'arg-kth-max
                              (syntax-srcloc #'x-expr)
@@ -522,7 +522,7 @@
         (list "the value to taken argmin from"))
      #:with x-expr/kc
      #`(contracted-v/kc
-        (dp-integer-w/c #f) x-in-X.X
+        (dp-integer-w/kc #f) x-in-X.X
         (syntax-srcloc #'x-in-X.X)
         'argmin
         (list "the value to taken argmin from"))
@@ -532,12 +532,12 @@
          (snd
           (lst-argmin
            (λ (x-in-X.x) (dp-int-unwrap
-                          #`(constracted-v/kc
-                             (dp-integer-w/c #f)
-                             (fst x-in-X.x)
-                             'arg-min
-                             (syntax-srcloc #'x-expr)
-                             (list "an value to be considered minimum"))))
+                          (contracted-v/kc
+                           (dp-integer-w/kc #f)
+                           (fst x-in-X.x)
+                           'arg-min
+                           (syntax-srcloc #'x-expr)
+                           (list "an value to be considered minimum"))))
            set-member-lst)))]))
 
 (define-syntax arg-kth-min
@@ -557,8 +557,8 @@
      #`(let rec ([n (dp-int-unwrap k/kc)]
                  [min-xs (set )])
          (let ([cur-min
-                (argmin #`(constracted-v/kc
-                             (dp-integer-w/c #f)
+                (argmin (contracted-v/kc
+                             (dp-integer-w/kc #f)
                              x-expr
                              'arg-kth-min
                              (syntax-srcloc #'x-expr)
@@ -668,7 +668,7 @@
             #;(make-simple-contract (v)
               (dp-int-ge v 1)
               "index needs to be at least 1")
-            dp-int-not-exp-size/c)])
+            dp-int-not-exp-size/kc)])
        any/kc)
   (dp-list->set
    (map

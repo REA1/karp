@@ -3,6 +3,7 @@
 (require
   (prefix-in r: rosette/safe)
 
+  "../private/primitive-data-type.rkt"
   "../private/problem-definition-core.rkt"
   "../private/karp-contract.rkt"
   [for-syntax racket/syntax
@@ -71,7 +72,7 @@
           (r:λ (the-mapping k)
                (if (dp-symbolic? k)
                    (raise "the domain element referred in mapping can not contains value to be solved")
-                   (hash-ref (dp-mapping-H the-mapping) k)))
+                   (hash-ref (dp-mapping-H the-mapping) (dp-wrap-if-raw-int k))))
           #:methods gen:custom-write
           [(define write-proc
              (r:λ (the-map port mode)
@@ -173,11 +174,11 @@
 (define/contract/kc (lookup a-mapping k)
   (->k ([m (dp-mapping/kc any/kc any/kc)]
         [k (m) (make-simple-contract/kc (v)
-             (set-∈ v (dom m))
-             (format "expects an element in the domain of ~e" m))]) any/kc)
+               (set-∈ v (dom m))
+               (format "expects an element in the domain of ~e" m))]) any/kc)
   (if (dp-symbolic? k)
-      (raise "the domain element referred in mapping can not contains value to be solved")
-      (hash-ref (dp-mapping-H a-mapping) k)))
+      (raise "the domain element referred in mapping can not contains value to be solved")      
+      (hash-ref (dp-mapping-H a-mapping) (dp-wrap-if-raw-int k))))
 
 ; contract combinator for mapping
 ; with domain (from) elements and range (to) elements satisfying given contract, internal
@@ -495,7 +496,8 @@
       (syntax-parse stx
         ; TODO: check if k, v is symbolic
         [(_ (k (~datum ~>) v) ...)
-         #'(dp-mapping (make-immutable-hash (list (cons k v) ...))
+         #'(dp-mapping (make-immutable-hash (list (cons (dp-wrap-if-raw-int k)
+                                                        (dp-wrap-if-raw-int v)) ...))
                        ; XXX : assuming intention is given by the first element
                        ;       i.e., whether it is used as a set or as an abstract element
                        (if (dp-mergeable? (car (list v ...)))

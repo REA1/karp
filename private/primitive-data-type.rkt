@@ -182,7 +182,7 @@
  dp-int-unwrap
  dp-int-size-of
  dp-int-not-exp-size/kc
- dp-int-not-exp-size/c
+ ;dp-int-not-exp-size/c
  dp-int-max-size
  dp-int-lst-max-size
 
@@ -202,6 +202,7 @@
  dp-int-min
  ; only exposed in reduction
  dp-expt
+ dp-quotient
  dp-mod
  dp-even?
  dp-odd?)
@@ -320,6 +321,7 @@
         [(dp-integer? x) x]
         [else (error "expects an integer, gets" x)]))
 
+; for profiling, not in use
 (define unwrap-count 0)
 
 (define (dp-int-unwrap x)
@@ -351,7 +353,7 @@
       #t))
 
 (define-simple-contract/kc dp-int-not-exp-size/kc (v)
-  (equal? (dp-int-size-of v) 'exp)
+  (not (equal? (dp-int-size-of v) 'exp))
   "expects a value being polynomial of the input length")
 
 (define (dp-int-lst-max-size lst)
@@ -434,6 +436,13 @@
                             'poly)
                         'exp))
                 )))
+
+(define/contract/kc (dp-quotient x y)
+  (->k ([x (dp-integer-w/kc #f)] [y (dp-integer-w/kc #f)]) any/kc)
+  (let ([raw-x (dp-int-unwrap x)]
+        [raw-y (dp-int-unwrap y)])
+    ; XXX: size can be made more precise?
+    (dp-integer (quotient raw-x raw-y) (dp-int-max-size x y))))
 
 (define/contract/kc (dp-mod x y)
   (->k ([x (dp-integer-w/kc #f)] [y (dp-integer-w/kc #f)]) any/kc)
