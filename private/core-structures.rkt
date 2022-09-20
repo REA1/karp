@@ -1807,6 +1807,10 @@
  at-most-1-element-of
  ∃
  exactly-1-element-of
+ (rename-out [∀ forall-element-of]
+             [∃ exists-some-element-of]
+             [at-most-1-element-of ∃<=1]
+             [exactly-1-element-of ∃=1])
 
  sum
  max

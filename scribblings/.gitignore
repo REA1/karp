@@ -1,0 +1,6 @@
+**/*.css
+**/*.js
+**/*.html
+**/*.png
+**/katex
+!figures/*

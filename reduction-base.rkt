@@ -113,6 +113,7 @@
 (define (el? a-sth)
   (el-struct? a-sth))
 
+; TODO: Add contracts to subscript accessors
 ; first subscript
 (define (_1s a-el)
   (list-ref (el-struct-subscripts a-el) 0))
@@ -185,6 +186,7 @@
 
 (define/contract/kc (index-in e a-set)
   (->k ([e any/kc] [a-set dp-set/kc]) any/kc)
+  ; TODO: complete the contract
   ; XXX: unfortunately we can not tell if the result is constant or poly
   ;      unless we know whether a-set is constant
   (hash-ref (dp-set-element-index a-set) (dp-wrap-if-raw-int e)))

@@ -1,0 +1,18 @@
+#lang karp/problem-definition
+
+(require karp/lib/graph)
+
+(decision-problem #:name iset
+                  #:instance ([G is-a (graph #:undirected)]
+                              [k is-a (natural)])
+                  #:certificate (subset-of (vertices-of G)))
+
+
+(define-iset-verifier y c^y
+  (and
+   (>= (set-size c^y) (k y))
+   (∀ [u ∈ c^y]
+      (∀ [v ∈ c^y]
+         (set-∉ u (neighbors (G y) v))))
+   ))
+
