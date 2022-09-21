@@ -99,7 +99,7 @@ takes care of the fields that share the same name across the two decision proble
 
 @defform[(if cond-expr then-expr else-expr)]{
     @$${\begin{cases}
-           a & p
+           a & p \\
            b & o.w.
         \end{cases}}
    where @${a} is @racket[then-expr], @${b} is @racket[else-expr], and

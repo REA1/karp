@@ -18,25 +18,25 @@ from @3-SAT to @I-SET in Karp.
 Recall that a decision problem is a problem that has answer "yes" or "no". A decision problem
 is in @${NP} if there exists short certificates for instances with "yes" answer.
 
-A (Karp) reduction from NP @${X} to @${Y} is a transformation that takes an instance of
+A (Karp) reduction from NP problem @${X} to @${Y} is a transformation that takes an instance of
 @${X} and produces an instance of @${Y} in polynomial time that preserves the yes/no answer.
 
 A runnable and testable reduction in Karp from decision problem @racketid[X] to decision
 problem @racketid[Y] consists of four parts:
 @itemize{
-  @item{The @italic{problem definition of decision} problem @racketid[X] and @racketid[Y].}
-  @item{The @italic{forward instance construction} that transforms any @racketid[X]-instance
+  @item{The @italic{problem definition} of decision problem @racketid[X] and @racketid[Y].}
+  @item{The @italic{forward instance construction} that transforms an @racketid[X]-instance
   to an @racketid[Y]-instance.}
-  @item{The @italic{forward certificate construction} that transforms any certificate of a given
+  @item{The @italic{forward certificate construction} that transforms a certificate of a given
  @racketid[X]-instance @racketid[x] to a certificate of the @racketid[Y]-instance obtained by applying 
  @italic{forward instance construction} @racketid[x].}
-  @item{The @italic{backward certificate construction} that transforms any certificate of the
+  @item{The @italic{backward certificate construction} that transforms a certificate of the
   @racketid[Y]-instance obtained by applying @italic{forward instance construction} to a given
  @racketid[X]-instance @racketid[x] back to a certificate of @racketid[x].}
 }
 
 The @italic{forward instance construction} is the (Karp) "reduction" in the usual sense and
-the two certificate constructions serve as the proof of yes/no answers are preserved.
+the two certificate constructions serve as the proof of yes/no answers being preserved.
 
 @section{Problem Definitions}
 
@@ -71,8 +71,8 @@ The problem definition of @3-SAT is given below:
  ]
 The definition of a problem consists of two parts:
 @itemlist[#:style 'ordered
-          @item{Problem structure definition:
-          @racket[decision-problem] defines a problem along with its instance and
+          @item{Problem structure definition: The definition form
+          @racket[decision-problem] defines a decision problem along with its instance and
           certificate data structure.}
           @item{Verifier definition: Defining the problem structure enables
            the @racketid[define-3sat-verifier] form used to define the certificate verifier of
@@ -124,7 +124,7 @@ In a similar manner, the @I-SET problem can be defined as follows:
        (set-∉ v c^iset)))))"
  ]
 
-The definition of independent set uses the Karp graph
+The definition of independent set uses Karp's graph
 library. A graph can be created as follows:
 @codeblock[
  #:keep-lang-line? #f
@@ -137,7 +137,7 @@ library. A graph can be created as follows:
  (define G1 (create-graph V1 E1))
  "
 ]
-We can then create an independent set from the graph
+We can then create an @racket[iset] instance from the graph
 and play around with it:
 @codeblock[
  #:keep-lang-line? #f
@@ -168,30 +168,30 @@ respectively.
 ]
 
 Recall that in a correct reduction from @3-SAT to @I-SET
-constructs a @I-SET instance from a given @3-SAT instance in the following steps:
+constructs an @I-SET instance from a given @3-SAT instance in the following steps:
 
 @itemlist[ #:style 'ordered
-@item{First, create a vertices for each literals in each clause of the @3-SAT instance:
+@item{Create a vertex for each literal in each clause of the CNF of the @3-SAT instance:
 @image["figures/1.png"
        #:scale 0.2]{V}}
 
-@item{Then, adding the set of edges @${E1} that connects the vertices that correspond to
+@item{Add the set of edges @${E1} that connects the vertices that correspond to
 literals that are negation of each other:
 @image["figures/2.png"
        #:scale 0.2]}
 
-@item{Next, adding the set of edges @${E2} that connects the vertices that correspond to
+@item{Add the set of edges @${E2} that connects the vertices that correspond to
 literals in the same clause.
 @image["figures/3.png"
        #:scale 0.2]}
 
-@item{Finally, putting the graph together and set the threshold @${k} to be the number
+@item{Finally, by putting the graph together and set the threshold @${k} to be the number
 of clauses, we get the @I-SET instance.}
 ]
 
 The Karp code for the procedure is shown below:
-@racketblock[
- (define-forward-instance-construction
+@codeblock[
+ "(define-forward-instance-construction
   #:from 3sat #:to iset
   (3sat->iset-v1 a-3sat-inst)
 
@@ -212,17 +212,18 @@ The Karp code for the procedure is shown below:
 
   ; commenting out the E2 to introduce a mistake
   (create-iset-instance ([G (create-graph V (set-∪ E1 E2))]
-                         [k (set-size Cs)])))]
-The code shown above defines a instance transformation function with name
-@racket[3sat->iset-v1] which takes one arguement @racket[a-3sat-inst].
+                         [k (set-size Cs)])))"]
+The code shown above defines an instance transformation function with name
+@racket[3sat->iset-v1] which takes one arguement @racket[a-3sat-inst]
+and produces an @racket[iset] instance.
 
-In the definition of @racketid[E1], we create the vertices
-as abstract elements @racketid[el] with first subscript being
+In the definition of @racketid[E1], we create each vertices
+as an abstract element @racketid[el] with first subscript being
 the literal itself and the second subscript being the index
-of the clause in the CNF the literal comes from.
+of the clause in the CNF that literal comes from.
 
-@racket[[(C #:index i) ∈ Cs]] binds the index of the current element in question
-@racket[C] in set @racket[Cs] to @racket[i].
+@racket[[(C #:index i) ∈ Cs]] binds the index of the current element @racket[C]
+in question @racket[C] in set @racket[Cs] to @racket[i].
 
 @racket[((el l1 i) . -e- . (el l2 j))] creates an (undirected) edge with endpoints 
 @racket[(el l1 i)] and @racket[(el l2 j)].
@@ -234,14 +235,15 @@ instance to a certificate of the to-problem. It serves as a proof that
 a no-instance is always transformed to a no-instance.
 
 To construct a certificate of @I-SET from a certificate of @3-SAT,
-we find one literal in each clause of the CNF and pick the vertices
+we find one literal in each clause of the CNF that is satisfied
+under the assignment and pick the vertices
 corresponding to these literals to form the certificate.
 @image["figures/4.png"
        #:scale 0.2]
 
-The Karp code of which is shown below:
-@racketblock[
- (define-forward-certificate-construction
+The Karp code is shown below:
+@codeblock[
+ "(define-forward-certificate-construction
   #:from 3sat #:to iset
   (3sat->iset->>-cert-v1 s->t-constr a-3sat-inst c^sat)
 
@@ -255,30 +257,30 @@ The Karp code of which is shown below:
             (and (negative-literal? l)
                  (not (c^sat (underlying-var l))))))
         i)
-       for [(C #:index i) in (φ a-3sat-inst)]}))]
+       for [(C #:index i) in (φ a-3sat-inst)]}))"]
 The code snippet defines a transformation function with name
 @racket[3sat->iset->>-cert-v1] that expects three arguments:
 @itemlist{@item{an instance transformation function @racket[s->t-constr]}@item{a @racket[3sat] instance @racket[a-3sat-inst]}@item{a @racket[3sat] certificate @racket[c^sat],
-  which is a mapping from the variables of @racket[a-3sat-inst] to booleans}}
- It returns a @racket[iset] certificate, which is a subset of vertices.
+  which is a mapping from the variables of @racket[a-3sat-inst] to Booleans}}
+ It returns an @racket[iset] certificate, which is a subset of vertices.
 
 @subsection{Backward Certificate Construction}
 
 The backward certificate construction maps a certificate of the to-problem
-instance back to a certificate of the from-problem. It serves as a proof that
+instance back to a certificate of the from-problem instance. It serves as a proof that
 a yes-instance is always transformed to a yes-instance.
 
-To construct a @3-SAT certificate from a @I-SET certificate:
+To construct a @3-SAT certificate from an @I-SET certificate:
 We first find those variables that should be assigned to true.
 Each of these variable must be the underlying variable of some
-positive literal and the vertex correponding to the literal is
+positive literal, the vertex correponding to which is
 in the independent set. We then create a mapping with these
 variables mapped to true and all other variables mapped to false.
 (The illustration is the same as the previous one)
 
 The procedure is decribed in Karp as follows:
-@racketblock[
-(define-backward-certificate-construction
+@codeblock[
+"(define-backward-certificate-construction
   #:from 3sat #:to iset 
   (3sat->iset-<<-cert-v1 s->t-constr a-3sat-inst c^iset)
 
@@ -292,7 +294,7 @@ The procedure is decribed in Karp as follows:
                        (equal? (underlying-var (_1s v)) x)))}))
   (mapping
    [x ∈ X-True] ~> #t
-   [x ∈ (set-minus X X-True)] ~> #f))]
+   [x ∈ (set-minus X X-True)] ~> #f))"]
 
 To extract the corresponding literal from the vertex, we
 use @racket[_1s] to get the first subscript of the vertex,
@@ -300,15 +302,15 @@ which is an abstract element as we defined in the instance construction.
 
 @subsection{Testing Reductions}
 We now have all parts of a runnable and testable reduction ready, we can
-random test the reduction with @racket[check-reduction] by suppplying it
-with the three transformation functions we just defined.
+random test it with @racket[check-reduction] by supplying the three transformation
+functions we just defined.
 @racketblock[(check-reduction #:from 3sat #:to iset
                  3sat->iset-v1 3sat->iset->>-cert-v1 3sat->iset-<<-cert-v1)]
 
 To see how a buggy reduction can be caught by the random testing,
 omitting the @racket[E2] in the instance construction and rerun
-the @racket[check-reduction]. @racket[(get-counterexample)] can be used
+@racket[check-reduction]. @racket[(get-counterexample)] can be used
 to access the @3-SAT instance found as counterexample in the latest
-run of the @racket[check-reduction]. To reproduce the testing result
+run of the @racket[check-reduction]. To reproduce the testing results
 to help debugging, a random seed can be specified by adding an extra
 option @racket[#:random-seed] to @racket[check-reduction].

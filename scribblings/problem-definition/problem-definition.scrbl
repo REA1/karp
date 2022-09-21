@@ -131,7 +131,7 @@
          (∀ [x ∈ X] pred-x)
          #:contracts ([X set?]
                       [pred-x boolean-expression?])]{
- Universial quantifier expression over the set @racket[X].
+ Universial quantifier expression over set @racket[X].
  Test if all element @racket[x] in @racket[X] satisfy @racket[pred-x].                                           
 }
 
@@ -139,7 +139,7 @@
          (∃ [x ∈ X] pred-x)
          #:contracts ([X set?]
                       [pred-x boolean-expression?])]{
- Existential quantifier expression over the set @racket[X].
+ Existential quantifier expression over set @racket[X].
  Test if there exists some element @racket[x] of @racket[X] satisfies @racket[pred-x].
 }
 
