@@ -3,4 +3,5 @@
 **/*.html
 **/*.png
 **/katex
+karp/*
 !figures/*

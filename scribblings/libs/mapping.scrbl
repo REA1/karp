@@ -8,6 +8,8 @@
 
 @defproc[(lookup [f mapping?] [k nay]) any]{
   Get the image of @racket[k] under the mapping @racket[f].
+  The @racket[lookup] keyword can be omitted in the verifier definition,
+  i.e., use @racket[(f k)] instead of @racket[(lookup f k)].
 }
 
 @defproc[(dom [f mapping?]) any]{

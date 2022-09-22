@@ -139,13 +139,13 @@
     (match type-lst
       [(args-τ (_ (tMapping τb-k τb-v)) ('CON τb-k))
        (syntax-parser
-         [(a-mapping key) (cons #'(a-mapping key) τb-v)])]
+         [((~optional lookup) a-mapping key) (cons #'(a-mapping key) τb-v)])]
       [(args-τ (_ (tMapping τb-k τb-v)) ('SYM b-k))
        (syntax-parser
-         [(a-mapping key) (cons #'(lookup-safe a-mapping key) τb-v)])]
+         [((~optional lookup) a-mapping key) (cons #'(lookup-safe a-mapping key) τb-v)])]
       [(args-τ (_ (tMapping τb-k τb-v)) ('SYM τb-k2))
        (syntax-parser
-         [(a-mapping key) (raise-syntax-error #f
+         [((~optional lookup) a-mapping key) (raise-syntax-error #f
                               (format "domain element type mismatch: expects ~a, gets ~a"
                                       τb-k τb-k2)
                               #'(a-mapping key) #'key)])]

@@ -65,9 +65,9 @@ The problem definition of @3-SAT is given below:
    (∀ [C ∈ (clauses-of (φ a-inst))]
       (∃ [l ∈ (literals-of C)]
          (or (and
-              (positive-literal? l) (c^3sat (underlying-var l)))
+              (positive-literal? l) (lookup c^3sat (underlying-var l)))
              (and
-              (negative-literal? l) (not (c^3sat (underlying-var l))))))))"
+              (negative-literal? l) (not (lookup c^3sat (underlying-var l))))))))"
  ]
 The definition of a problem consists of two parts:
 @itemlist[#:style 'ordered
@@ -253,9 +253,9 @@ The Karp code is shown below:
         (find-one [l ∈ C] s.t.
           (or
             (and (positive-literal? l)
-                 (c^sat (underlying-var l)))
+                 (lookup c^sat (underlying-var l)))
             (and (negative-literal? l)
-                 (not (c^sat (underlying-var l))))))
+                 (not (lookup c^sat (underlying-var l))))))
         i)
        for [(C #:index i) in (φ a-3sat-inst)]}))"]
 The code snippet defines a transformation function with name

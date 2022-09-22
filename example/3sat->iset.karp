@@ -31,9 +31,9 @@
 
   (for/set {(el
              (find-one [l ∈ C] s.t. (or (and (positive-literal? l)
-                                             (c^3sat (underlying-var l)))
+                                             (lookup c^3sat (underlying-var l)))
                                         (and (negative-literal? l)
-                                             (not (c^3sat (underlying-var l))))))
+                                             (not (lookup c^3sat (underlying-var l))))))
              i)
              for [(C #:index i) in (φ a-3sat-inst)]})
   )
