@@ -10,40 +10,95 @@
 @(define 3-SAT @${\rm 3\text{-}S{\small AT}})
 @(define I-SET @${\rm I{\small NDEPENDENT}\text{-}S{\small ET}})
 
-@title[#:tag "ch:quickstart" #:style (with-html5 manual-doc-style)]{Getting Started with Karp by Example: 3sat to independent-set}
+@title[#:tag "ch:quickstart" #:style (with-html5
+manual-doc-style)]{Getting Started with Karp, by Example}
 
-In this short guide we will formulate the reduction
-from @3-SAT to @I-SET in Karp.
+We start with a preliminary discussion of NP problems and reductions. 
 
-Recall that a decision problem is a problem that has answer "yes" or "no". A decision problem
-is in @${NP} if there exists short certificates for instances with "yes" answer.
+In Karp, reductions concern decision problems, that is, 
+problems that have a "yes" or "no" answers. Two classic decision problems
+are @3-SAT and @|I-SET|. The first asks whether a 3-CNF formula is
+satisfiable. The second asks whether an undirected graph has at least
+@${k} nodes that are not neighbors with each other. 
 
-A (Karp) reduction from NP problem @${X} to @${Y} is a transformation that takes an instance of
-@${X} and produces an instance of @${Y} in polynomial time that preserves the yes/no answer.
+We say that an instance of a decision problem is a yes-instance if there exists a
+certificate that verifies the ``yes'' answer. For instance, for an instance of
+@3-SAT, that is a specifc 3-CNF formula, a certificate is a satisfying assignment
+that is a map from the variables of the formula to the booleans that makes
+the formula true. Similarly, for an instance
+of @I-SET, that is an undirected graph and a natural number @${k}, a
+certificate is a subset of the nodes of the graph that has at least size
+@${k} and the nodes it contains are not neighbors. 
 
-A runnable and testable reduction in Karp from decision problem @racketid[X] to decision
-problem @racketid[Y] consists of four parts:
+If an instance has no certificate, then it is a no-instance. 
+
+We say a decision problem is in @${NP} if there exist short certificates for
+all yes-instances, that is, there are ceritificates that
+can verify the ``yes'' answer in poly-time with respect to the size of the
+instance. Given a candidate certifcate for an instance, it is much easier
+to verify the ``yes'' or ``no'' answer than solving the actual instance.
+Hence, this definition admits both problems that we know how to solve
+easily, that is in poly-time, and hard problems for which we do not have
+poly-time algoritms.  
+
+A principled way to show that an @${NP} decision problem, such as
+@I-SET,  is hard is with a correct reduction from a well-known @${NP}-hard
+problem, such as @3-SAT, to the problem whose ``hardness'' we investigate. 
+A reduction is a function that given an instance of its from-problem
+constructs an instance of its to-problem. A @bold{correct} reduction is a
+@bold{poly-time} reduction that 
+@bold{maps yes-instances to yes-instance and no-instances to
+no-instances}. For instance, a correct reduction from @3-SAT to @I-SET maps
+(i) every 3-CNF formula with a satisfying assignment to an undirected graph
+that has an independent size of at least size @${k}, for some @${k}; and
+(ii) every 3-CNF that does not have a satisfying assignemnt to an an undirected graph
+that has no independent size of at least size @${k}, for some @${k};
+
+@section{The Structure of Reductions in Karp}
+
+A reduction in Karp from decision problem @racketid[X] to decision
+problem @racketid[Y] consists of three main pieces:
 @itemize{
-  @item{The @italic{problem definition} of decision problem @racketid[X] and @racketid[Y].}
-  @item{The @italic{forward instance construction} that transforms an @racketid[X]-instance
-  to an @racketid[Y]-instance.}
-  @item{The @italic{forward certificate construction} that transforms a certificate of a given
- @racketid[X]-instance @racketid[x] to a certificate of the @racketid[Y]-instance obtained by applying 
- @italic{forward instance construction} @racketid[x].}
-  @item{The @italic{backward certificate construction} that transforms a certificate of the
-  @racketid[Y]-instance obtained by applying @italic{forward instance construction} to a given
- @racketid[X]-instance @racketid[x] back to a certificate of @racketid[x].}
-}
+  @item{The two @italic{problem definition}s of @racketid[X] and
+  @racketid[Y].}
+  @item{The @italic{forward instance construction}, that is, the reduction
+  itself which given an instance of  @racketid[X] constructs
+  an instance of @racketid[Y].}}
 
-The @italic{forward instance construction} is the (Karp) "reduction" in the usual sense and
-the two certificate constructions serve as the proof of yes/no answers being preserved.
+In addition to these three pieces, for each reduction, Karp requires the
+definition of two additional
+functions that play the role of a proof argument about the correctness of 
+the reduction:
+
+@itemize{
+  @item{The @italic{forward certificate construction} consumes 
+  @racketid[x], a yes-instance of @racketid[X], and a certificate
+  for @racketid[x], and produces a certificate for @racketid[y], the 
+  result of applying the forward instance construction from @racketid[X] to
+  @racketid[Y] on @racketid[x].}
+   @item{The @italic{backward certificate construction} consumes 
+  @racketid[x], a yes-instance of @racketid[X], and a certificate
+  for @racketid[y], the 
+  result of applying the forward instance construction from @racketid[X] to
+  @racketid[Y] on @racketid[x], and produces a certificate for @racketid[y].}}
+
+In essence, if these two functions succeed in translating a certificate for
+any @racketid[x] to a certificate for the corresponding @racketid[y] and back,
+the forward instance construction is correct: it translates yes(no)-instances
+of @racketid[X] to yes(no)-instances of @racketid[Y].
+
+In the remainder of this section, we use the reduction from @3-SAT to @I-SET 
+to demonstrate concretely the five pieces of  a reduction
+in Karp.
+
 
 @section{Problem Definitions}
 
-The definition of a decision problem in Karp is written in the sublangauge:
-@racketmod[karp/problem-definition]
 
-@subsection{3-Sat}
+
+Each problem definition is written as a separate module of the dedicated
+language @racket[karp/problem-definition].
+
 The problem definition of @3-SAT is given below:
 @codeblock[
    #:indent 0
@@ -53,7 +108,7 @@ The problem definition of @3-SAT is given below:
   (require karp/lib/cnf
            karp/lib/mapping)
 
-  ; problem structure definition
+  ; problem shape
   (decision-problem
             #:name 3sat
             #:instance ([φ is-a (cnf #:arity 3)])
@@ -69,17 +124,25 @@ The problem definition of @3-SAT is given below:
              (and
               (negative-literal? l) (not (lookup c^3sat (underlying-var l))))))))"
  ]
-The definition of a problem consists of two parts:
+The problem definition has two parts:
 @itemlist[#:style 'ordered
-          @item{Problem structure definition: The definition form
-          @racket[decision-problem] defines a decision problem along with its instance and
-          certificate data structure.}
-          @item{Verifier definition: Defining the problem structure enables
-           the @racketid[define-3sat-verifier] form used to define the certificate verifier of
-           @racketid[3sat]. A verifier is a function that takes an instance and an alleged
-           certificate, checking if the certificate is indeed a certificate of the instance.
-           The body of the verifier should produce a Boolean.
-           }]
+          @item{Problem shape: The definition form
+          @racket[decision-problem] gives a name to the defined problem,
+          and specifies the shape of its
+          instances and certificates. For
+          @3-SAT, an instance is a 3-CNF formula @racketid[φ], 
+          and a certificate a
+          mapping from the variables of @racketid[φ] to the set of booleans.}
+          @item{Verifier definition: the definition of the problem shape
+          generates a form for defining  the certificate verifier of
+          problem, that is a predicates that takes an instance and an alleged
+           certificate, and checks if the alleged certificate 
+           is indeed a certificate of the
+           given instance. In the running example,
+           the @racketid[define-3sat-verifier] form checks if the given
+           assignment @racketid[c^3sat] makes true at least one literal
+           @racketid[l] of each clause @racketid[C] of the given instance
+           @racketid[a-inst].}]
 
 After the problem @racketid[3sat] is defined, the constructors and the
 certificate solver of @racketid[3sat] instances are enabled: 
@@ -99,7 +162,6 @@ certificate solver of @racketid[3sat] instances are enabled:
  (3sat-verifier foo foo-cert2) ;#t"
 ]
 
-@subsection{Independent Set}
 
 In a similar manner, the @I-SET problem can be defined as follows:
 @codeblock[
