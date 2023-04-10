@@ -27,7 +27,7 @@
 
 (define-forward-certificate-construction
   #:from 3sat #:to iset
-  (3sat->iset->>-cert-v1 s->t-constr a-3sat-inst c^3sat)
+  (3sat->iset->>-cert-v1 f->t-constr a-3sat-inst c^3sat)
 
   (for/set {(el
              (find-one [l ∈ C] s.t. (or (and (positive-literal? l)
@@ -40,7 +40,7 @@
 
 (define-backward-certificate-construction
   #:from 3sat #:to iset 
-  (3sat->iset-<<-cert-v1 s->t-constr a-3sat-inst c^iset)
+  (3sat->iset-<<-cert-v1 f->t-constr a-3sat-inst c^iset)
 
   (define X (vars-of (φ a-3sat-inst)))
   (define X-True
