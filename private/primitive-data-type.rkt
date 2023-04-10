@@ -604,6 +604,9 @@
                                         (map get-τb arg-lst))
                                 #'(or arg ...)
                                 #'or)])])))
+
+(kv-func-type-annotate xor ((tBool) (tBool) (tBool)) "two booleans")
+(kv-func-type-annotate implies ((tBool) (tBool) (tBool)) "two booleans")
 (kv-func-type-annotate not ((tBool) (tBool)) "one booleans")
 ;------------------------------------------
 ; end of primitive operators

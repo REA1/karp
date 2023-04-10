@@ -234,17 +234,17 @@ constructs an @I-SET instance from a given @3-SAT instance in the following step
 
 @itemlist[ #:style 'ordered
 @item{Create a vertex for each literal in each clause of the CNF of the @3-SAT instance:
-@image["figures/1.png"
+@image["scribblings/figures/1.png"
        #:scale 0.2]{V}}
 
 @item{Add the set of edges @${E1} that connects the vertices that correspond to
 literals that are negation of each other:
-@image["figures/2.png"
+@image["scribblings/figures/2.png"
        #:scale 0.2]}
 
 @item{Add the set of edges @${E2} that connects the vertices that correspond to
 literals in the same clause.
-@image["figures/3.png"
+@image["scribblings/figures/3.png"
        #:scale 0.2]}
 
 @item{Finally, by putting the graph together and set the threshold @${k} to be the number
@@ -300,7 +300,7 @@ To construct a certificate of @I-SET from a certificate of @3-SAT,
 we find one literal in each clause of the CNF that is satisfied
 under the assignment and pick the vertices
 corresponding to these literals to form the certificate.
-@image["figures/4.png"
+@image["scribblings/figures/4.png"
        #:scale 0.2]
 
 The Karp code is shown below:
