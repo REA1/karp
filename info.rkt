@@ -1,6 +1,6 @@
 #lang info
 (define collection "karp")
-(define deps '("base" "rosette"))
+(define deps '("base" "rosette" "draw-lib" "gui-lib" "pict-lib"))
 (define build-deps '("scribble-lib" "racket-doc" "rackunit-lib"
 		     "scribble-math"))
 (define scribblings '(("scribblings/karp.scrbl" (multi-page))))

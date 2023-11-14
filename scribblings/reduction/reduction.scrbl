@@ -4,7 +4,9 @@
 
 @(require (for-label karp/problem-definition
                      karp/reduction)
-          scribble-math)
+          scribble-math
+          scribble/example)
+@(define mk-eval (make-eval-factory '(karp/reduction)))
 
 @defmodulelang[karp/reduction]
 
@@ -13,7 +15,7 @@
            id inst-arg
            body ...+)]{
 
- Define a forward instance construciton function from decision
+ Define a forward instance construction function from decision
  problem @racket[from-name] to decision problem @racket[to-name]
  with name @racket[id]. The function takes one @racket[from-name]-instance
  as its arugment and produces one @racket[to-name]-instance as its output.
@@ -26,7 +28,7 @@
            #:from from-name #:to to-name
            id f->t-construction-arg inst-arg cert-arg
            body ...+)]{
- Define a forward certificate construciton function from decision
+ Define a forward certificate construction function from decision
  problem @racket[from-name] to decision problem @racket[to-name]
  with name @racket[id]. The function takes one @racket[from-name]-instance
  and a @racket[from-name]-certificate of the instance
@@ -40,7 +42,7 @@
            #:from from-name #:to to-name
            id f->t-construction-arg inst-arg cert-arg
            body ...+)]{
- Define a forward certificate construciton function from decision
+ Define a forward certificate construction function from decision
  problem @racket[from-name] to decision problem @racket[to-name]
  with name @racket[id]. The function takes one @racket[from-name]-instance
  and a @racket[to-name]-certificate of the instance
@@ -110,16 +112,32 @@ takes care of the fields that share the same name across the two decision proble
          (for/set { el-expr element-in-set ...+ maybe-cond })
          #:grammar ([element-in-set (code:line for [var ∈ X])]
                     [var x (code:line (x #:index i))]
-                    [maybe-cond (code:line if cond-expr)])
+                    [maybe-cond (code:line if cond-expr) (code:line)])
          #:contracts ([X set?]
                       [cond-expr boolean-expression?])]{
 Create a set with representative element @racket[el-expr] going over all element @racket[x]
 in @racket[X] ... satisfying the @racket[cond-expr], i.e.,
 @$${ \{ f(x,y,\dots) \mid x \in X(y,\dots), y \in Y(\dots),P(x,y,\dots) \} }
-}
+where @${f(x,y,\dots)} is the value produced by @racket[el-expr].
+
+In this example, the elements of the set are sums of @racket[i] and @racket[j],
+where @racket[i] and @racket[j] are drawn from the sets @${\{1,2,3\}} and @${\{4,5,6\}}, respectively.
+@examples[#:eval (mk-eval) #:label #f
+          (for/set {(+ i j)
+            for [i ∈ (set 1 2 3)]
+            for [j ∈ (set 4 5 6)]})]
 
 When the form @racket[[(x #:index i) ∈ X]] is used, @racket[i] is bound to the index
 of @racket[x] in set @racket[X].
+ @examples[#:eval (mk-eval) #:label "Example"
+           (define set-of-abc (set "a" "b" "c"))
+           (for/set {(set x y)
+             for [(x #:index i) ∈ set-of-abc]
+             for [(y #:index j) ∈ set-of-abc]
+             if (not (equal? i j))})]
+
+
+}
 
 @defproc[(corr [x any]) any]{
  If @racket[x] is an element of a set created with @racket[for/set],
