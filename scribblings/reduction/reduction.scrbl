@@ -13,7 +13,7 @@
            id inst-arg
            body ...+)]{
 
- Define a forward instance construciton function from decision
+ Define a forward instance construction function from decision
  problem @racket[from-name] to decision problem @racket[to-name]
  with name @racket[id]. The function takes one @racket[from-name]-instance
  as its arugment and produces one @racket[to-name]-instance as its output.
@@ -26,7 +26,7 @@
            #:from from-name #:to to-name
            id f->t-construction-arg inst-arg cert-arg
            body ...+)]{
- Define a forward certificate construciton function from decision
+ Define a forward certificate construction function from decision
  problem @racket[from-name] to decision problem @racket[to-name]
  with name @racket[id]. The function takes one @racket[from-name]-instance
  and a @racket[from-name]-certificate of the instance
@@ -40,7 +40,7 @@
            #:from from-name #:to to-name
            id f->t-construction-arg inst-arg cert-arg
            body ...+)]{
- Define a forward certificate construciton function from decision
+ Define a forward certificate construction function from decision
  problem @racket[from-name] to decision problem @racket[to-name]
  with name @racket[id]. The function takes one @racket[from-name]-instance
  and a @racket[to-name]-certificate of the instance
