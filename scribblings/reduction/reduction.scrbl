@@ -120,21 +120,21 @@ in @racket[X] ... satisfying the @racket[cond-expr], i.e.,
 @$${ \{ f(x,y,\dots) \mid x \in X(y,\dots), y \in Y(\dots),P(x,y,\dots) \} }
 where @${f(x,y,\dots)} is the value produced by @racket[el-expr].
 
-In this example, the elements of the set are sums of @racket[i] and @racket[j],
-where @racket[i] and @racket[j] are drawn from the sets @${\{1,2,3\}} and @${\{4,5,6\}}, respectively.
+In this example, the elements of the set are sums of @racket[a] and @racket[b],
+where @racket[a] and @racket[b] are drawn from the sets @${\{1,2,3\}} and @${\{4,5,6\}}, respectively.
 @examples[#:eval (mk-eval) #:label #f
-          (for/set {(+ i j)
-            for [i ∈ (set 1 2 3)]
-            for [j ∈ (set 4 5 6)]})]
+          (for/set {(+ a b)
+            for [a ∈ (set 1 2 3)]
+            for [b ∈ (set 4 5 6)]})]
 
-When the form @racket[[(x #:index i) ∈ X]] is used, @racket[i] is bound to the index
+When the form @racket[[(e #:index j) ∈ X]] is used, @racket[j] is bound to the index
 of @racket[x] in set @racket[X].
  @examples[#:eval (mk-eval) #:label "Example"
            (define set-of-abc (set "a" "b" "c"))
-           (for/set {(set x y)
-             for [(x #:index i) ∈ set-of-abc]
-             for [(y #:index j) ∈ set-of-abc]
-             if (not (equal? i j))})]
+           (for/set {(set e1 e2 j)
+             for [(e1 #:index j) ∈ set-of-abc]
+             for [(e2 #:index k) ∈ set-of-abc]
+             if (not (equal? j k))})]
 
 
 }

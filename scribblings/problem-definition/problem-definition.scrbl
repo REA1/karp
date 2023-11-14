@@ -7,14 +7,16 @@
 
 @defmodulelang[karp/problem-definition]
 
+@defform[#:id is-a
+         is-a]{
+ Can only be used inside @racket[decision-problem].
+}
 
-@defform[#:literals (is-a)
-         (decision-problem #:name name
+@defform[(decision-problem #:name name
                             #:instance ([field-name is-a type-descriptor] ...+)
                             #:certificate type-descriptor)]{
   Defines a decision problem @racket[name] with its instance
   and certificate structures.
-
   Defining a decision problem @racket[x]'s structure enables 3 other language constructs:
   @itemize{
     @item{The constructor for @racket[x]-instance:
@@ -64,10 +66,12 @@
 }
 
 @defform[#:kind "type-descriptor"
-         (boolean)]{}
+         #:id boolean
+         boolean]{}
 
 @defform[#:kind "type-descriptor"
-         (symbol)]{}
+         #:id symbol
+         symbol]{}
 
 @subsection{Set}
 
